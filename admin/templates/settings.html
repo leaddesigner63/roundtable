@@ -1,20 +1,70 @@
 {% extends "base.html" %}
 {% block content %}
 <h1 class="title">Настройки</h1>
+
+<div class="box">
+    <h2 class="title is-4">Добавить/обновить настройку</h2>
+    <form method="post" action="/admin/settings">
+        <div class="columns">
+            <div class="column is-4">
+                <div class="field">
+                    <label class="label">Ключ</label>
+                    <div class="control">
+                        <input class="input" name="key" placeholder="MAX_ROUNDS" required>
+                    </div>
+                </div>
+            </div>
+            <div class="column is-4">
+                <div class="field">
+                    <label class="label">Значение</label>
+                    <div class="control">
+                        <input class="input" name="value" required>
+                    </div>
+                </div>
+            </div>
+            <div class="column is-4">
+                <div class="field is-grouped" style="margin-top: 2rem;">
+                    <div class="control">
+                        <button class="button is-primary" type="submit">Сохранить</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </form>
+</div>
+
 <table class="table is-fullwidth">
     <thead>
     <tr>
         <th>Ключ</th>
         <th>Значение</th>
+        <th></th>
     </tr>
     </thead>
     <tbody>
     {% for item in settings %}
     <tr>
         <td>{{ item.key }}</td>
-        <td>{{ item.value }}</td>
+        <td>
+            <form data-method="put" data-redirect="/admin/settings" action="/admin/settings/{{ item.key }}">
+                <div class="field has-addons">
+                    <div class="control is-expanded">
+                        <input class="input" name="value" value="{{ item.value }}" required>
+                    </div>
+                    <div class="control">
+                        <button class="button is-link" type="submit">Обновить</button>
+                    </div>
+                </div>
+            </form>
+        </td>
+        <td class="has-text-right">
+            <button class="button is-danger is-light" type="button" data-delete="/admin/settings/{{ item.key }}" data-redirect="/admin/settings">Удалить</button>
+        </td>
     </tr>
     {% endfor %}
     </tbody>
 </table>
+{% if not settings %}
+<p>Настройки не заданы.</p>
+{% endif %}
 {% endblock %}

@@ -24,5 +24,54 @@
         {% block content %}{% endblock %}
     </div>
 </section>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('form[data-method]').forEach((form) => {
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const method = (form.dataset.method || 'post').toUpperCase();
+            const action = form.getAttribute('action');
+            const redirectUrl = form.dataset.redirect || window.location.pathname;
+            const formData = new FormData(form);
+            const response = await fetch(action, {
+                method,
+                body: formData,
+            });
+            if (response.ok) {
+                if (response.redirected) {
+                    window.location.href = response.url;
+                } else {
+                    window.location.href = redirectUrl;
+                }
+            } else {
+                const text = await response.text();
+                alert(`Ошибка ${response.status}: ${text}`);
+            }
+        });
+    });
+
+    document.querySelectorAll('[data-delete]').forEach((element) => {
+        element.addEventListener('click', async (event) => {
+            event.preventDefault();
+            if (!confirm('Удалить запись?')) {
+                return;
+            }
+            const url = element.dataset.delete;
+            const redirectUrl = element.dataset.redirect || window.location.pathname;
+            const response = await fetch(url, { method: 'DELETE' });
+            if (response.ok) {
+                if (response.redirected) {
+                    window.location.href = response.url;
+                } else {
+                    window.location.href = redirectUrl;
+                }
+            } else {
+                const text = await response.text();
+                alert(`Ошибка ${response.status}: ${text}`);
+            }
+        });
+    });
+});
+</script>
 </body>
 </html>
