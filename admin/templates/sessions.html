@@ -15,7 +15,7 @@
     <tbody>
     {% for session in sessions %}
     <tr>
-        <td>{{ session.id }}</td>
+        <td><a href="/admin/sessions/{{ session.id }}">{{ session.id }}</a></td>
         <td>{{ session.user_id }}</td>
         <td>{{ session.topic }}</td>
         <td>{{ session.status }}</td>

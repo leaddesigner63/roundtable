@@ -3,10 +3,12 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class MessageSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     author_type: str
     author_name: str
@@ -16,11 +18,10 @@ class MessageSchema(BaseModel):
     cost: float
     created_at: datetime
 
-    class Config:
-        orm_mode = True
-
 
 class SessionParticipantSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     provider_name: str
     personality_title: str
@@ -29,17 +30,18 @@ class SessionParticipantSchema(BaseModel):
 
 
 class SessionSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
+    user_id: int
     topic: str
     status: str
     created_at: datetime
     finished_at: Optional[datetime]
     max_rounds: int
     current_round: int
-    messages: list[MessageSchema]
-
-    class Config:
-        orm_mode = True
+    messages: list[MessageSchema] = Field(default_factory=list)
+    participants: list[SessionParticipantSchema] = Field(default_factory=list)
 
 
 class CreateSessionRequest(BaseModel):

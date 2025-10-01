@@ -1,6 +1,6 @@
 from functools import lru_cache
-from pydantic_settings import BaseSettings
 from pydantic import AnyHttpUrl
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -21,10 +21,7 @@ class Settings(BaseSettings):
     deepseek_api_key: str
     deepseek_model: str = "deepseek-chat"
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = False
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", case_sensitive=False)
 
     @property
     def database_url(self) -> str:

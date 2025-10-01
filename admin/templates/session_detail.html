@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="title">Сессия #{{ session.id }}</h1>
+<div class="box">
+    <p><strong>Пользователь:</strong> {{ session.user_id }}</p>
+    <p><strong>Тема:</strong> {{ session.topic }}</p>
+    <p><strong>Статус:</strong> {{ session.status }}</p>
+    <p><strong>Раунды:</strong> {{ session.current_round }} / {{ session.max_rounds }}</p>
+    <p><strong>Создана:</strong> {{ session.created_at }}</p>
+    <p><strong>Завершена:</strong> {{ session.finished_at }}</p>
+    <p><strong>Всего токенов (in/out):</strong> {{ total_tokens_in }} / {{ total_tokens_out }}</p>
+    <p><strong>Суммарная стоимость:</strong> {{ '%.4f'|format(total_cost) }}</p>
+</div>
+
+<h2 class="subtitle">Участники</h2>
+<table class="table is-fullwidth is-striped">
+    <thead>
+    <tr>
+        <th>Порядок</th>
+        <th>Провайдер</th>
+        <th>Персоналия</th>
+        <th>Статус</th>
+    </tr>
+    </thead>
+    <tbody>
+    {% for participant in session.participants %}
+    <tr>
+        <td>{{ participant.order_index }}</td>
+        <td>{{ participant.provider_name }}</td>
+        <td>{{ participant.personality_title }}</td>
+        <td>{{ participant.status }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+
+<h2 class="subtitle">История сообщений</h2>
+<table class="table is-fullwidth is-hoverable">
+    <thead>
+    <tr>
+        <th>Время</th>
+        <th>Автор</th>
+        <th>Тип</th>
+        <th>Токены (in/out)</th>
+        <th>Стоимость</th>
+        <th>Текст</th>
+    </tr>
+    </thead>
+    <tbody>
+    {% for message in session.messages %}
+    <tr>
+        <td>{{ message.created_at }}</td>
+        <td>{{ message.author_name }}</td>
+        <td>{{ message.author_type }}</td>
+        <td>{{ message.tokens_in }} / {{ message.tokens_out }}</td>
+        <td>{{ '%.4f'|format(message.cost) }}</td>
+        <td style="white-space: pre-wrap;">{{ message.content }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endblock %}
