@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Roundtable Admin</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 2rem; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #ccc; padding: 0.5rem; }
+    </style>
+</head>
+<body>
+<h1>Sessions</h1>
+<table>
+    <thead>
+    <tr>
+        <th>ID</th>
+        <th>Topic</th>
+        <th>Status</th>
+        <th>Created</th>
+    </tr>
+    </thead>
+    <tbody>
+    {% for session in sessions %}
+    <tr>
+        <td>{{ session.id }}</td>
+        <td>{{ session.topic }}</td>
+        <td>{{ session.status }}</td>
+        <td>{{ session.created_at }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+</body>
+</html>
