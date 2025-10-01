@@ -67,7 +67,12 @@ async def test_full_session_flow(monkeypatch):
         assert response.status_code == 200
         data = response.json()
         assert data["status"] in {"running", "finished", "stopped"}
+        assert "messages" in data
+        assert len(data["messages"]) > 0
 
         response = await client.get(f"/api/sessions/{session_id}")
         assert response.status_code == 200
-        assert response.json()["id"] == session_id
+        session_data = response.json()
+        assert session_data["id"] == session_id
+        assert "messages" in session_data
+        assert session_data["messages"] == data["messages"]
