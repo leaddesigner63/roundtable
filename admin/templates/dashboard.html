@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="title">Статус системы</h1>
+<div class="box">
+    <p>Активных провайдеров: {{ stats.providers }}</p>
+    <p>Персоналий: {{ stats.personalities }}</p>
+    <p>Сессий: {{ stats.sessions }}</p>
+</div>
+{% endblock %}

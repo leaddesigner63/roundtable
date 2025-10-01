@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="title">Настройки</h1>
+<table class="table is-fullwidth">
+    <thead>
+    <tr>
+        <th>Ключ</th>
+        <th>Значение</th>
+    </tr>
+    </thead>
+    <tbody>
+    {% for item in settings %}
+    <tr>
+        <td>{{ item.key }}</td>
+        <td>{{ item.value }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endblock %}
