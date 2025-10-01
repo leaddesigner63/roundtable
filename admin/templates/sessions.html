@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <h1 class="title">Сессии</h1>
-<table class="table is-striped is-fullwidth">
+<table class="table is-fullwidth is-striped">
     <thead>
     <tr>
         <th>ID</th>
@@ -10,17 +10,46 @@
         <th>Статус</th>
         <th>Раунды</th>
         <th>Завершено</th>
+        <th>История</th>
+        <th></th>
     </tr>
     </thead>
     <tbody>
     {% for session in sessions %}
     <tr>
         <td>{{ session.id }}</td>
-        <td>{{ session.user_id }}</td>
+        <td>
+            {{ session.user.username if session.user else session.user_id }}<br>
+            <small class="has-text-grey">ID: {{ session.user_id }}</small>
+        </td>
         <td>{{ session.topic }}</td>
         <td>{{ session.status }}</td>
         <td>{{ session.current_round }} / {{ session.max_rounds }}</td>
-        <td>{{ session.finished_at }}</td>
+        <td>{{ session.finished_at or "—" }}</td>
+        <td style="width: 280px;">
+            <details>
+                <summary>Показать ({{ session.messages|length }})</summary>
+                <div class="mt-2">
+                    {% for message in session.messages %}
+                    <div class="box" style="padding: 0.75rem;">
+                        <p><strong>{{ message.author_name }}</strong> <small class="has-text-grey">{{ message.author_type }} · {{ message.created_at }}</small></p>
+                        <p style="white-space: pre-wrap">{{ message.content }}</p>
+                    </div>
+                    {% else %}
+                    <p class="has-text-grey">Сообщений нет.</p>
+                    {% endfor %}
+                </div>
+            </details>
+        </td>
+        <td class="has-text-right">
+            <form method="post" action="/admin/sessions/{{ session.id }}/stop" style="display:inline">
+                <button class="button is-small is-warning" type="submit" {% if session.status != 'running' %}disabled{% endif %}>Остановить</button>
+            </form>
+        </td>
+    </tr>
+    {% else %}
+    <tr>
+        <td colspan="8" class="has-text-centered has-text-grey">Сессий пока нет</td>
     </tr>
     {% endfor %}
     </tbody>

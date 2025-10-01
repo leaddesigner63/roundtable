@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="title">{{ title }}</h1>
+{% if errors %}
+<div class="notification is-danger">
+    <ul>
+        {% for error in errors %}
+        <li>{{ error }}</li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+<form method="post" action="{{ form_action }}">
+    <div class="field">
+        <label class="label">Название</label>
+        <div class="control">
+            <input class="input" type="text" name="name" value="{{ form.name }}" required>
+        </div>
+    </div>
+    <div class="field">
+        <label class="label">Тип</label>
+        <div class="control">
+            <input class="input" type="text" name="type" value="{{ form.type }}" required>
+        </div>
+    </div>
+    <div class="field">
+        <label class="label">API ключ</label>
+        <div class="control">
+            <input class="input" type="text" name="api_key" value="{{ form.api_key }}" {% if not form.api_key %}placeholder="Введите ключ"{% endif %}>
+        </div>
+        <p class="help">При редактировании можно оставить поле пустым, чтобы сохранить текущий ключ.</p>
+    </div>
+    <div class="field">
+        <label class="label">Model ID</label>
+        <div class="control">
+            <input class="input" type="text" name="model_id" value="{{ form.model_id }}" required>
+        </div>
+    </div>
+    <div class="field">
+        <label class="label">Параметры (JSON)</label>
+        <div class="control">
+            <textarea class="textarea" name="parameters" rows="6">{{ form.parameters }}</textarea>
+        </div>
+    </div>
+    <div class="field">
+        <label class="label">Порядок</label>
+        <div class="control">
+            <input class="input" type="number" name="order_index" value="{{ form.order_index }}">
+        </div>
+    </div>
+    <div class="field">
+        <label class="checkbox">
+            <input type="checkbox" name="enabled" {% if form.enabled %}checked{% endif %}>
+            Провайдер активен
+        </label>
+    </div>
+    <div class="field is-grouped">
+        <div class="control">
+            <button class="button is-primary" type="submit">Сохранить</button>
+        </div>
+        <div class="control">
+            <a class="button is-light" href="/admin/providers">Отмена</a>
+        </div>
+    </div>
+</form>
+{% endblock %}
