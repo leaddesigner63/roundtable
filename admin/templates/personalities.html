@@ -1,6 +1,36 @@
 {% extends "base.html" %}
 {% block content %}
 <h1 class="title">Персоналии</h1>
+
+<div class="box">
+    <h2 class="title is-4">Добавить персоналию</h2>
+    <form method="post" action="/admin/personalities">
+        <div class="field">
+            <label class="label">Название</label>
+            <div class="control">
+                <input class="input" name="title" required>
+            </div>
+        </div>
+        <div class="field">
+            <label class="label">Инструкции</label>
+            <div class="control">
+                <textarea class="textarea" name="instructions" required></textarea>
+            </div>
+        </div>
+        <div class="field">
+            <label class="label">Стиль</label>
+            <div class="control">
+                <textarea class="textarea" name="style"></textarea>
+            </div>
+        </div>
+        <div class="field is-grouped">
+            <div class="control">
+                <button class="button is-primary" type="submit">Создать</button>
+            </div>
+        </div>
+    </form>
+</div>
+
 <table class="table is-striped is-fullwidth">
     <thead>
     <tr>
@@ -8,17 +38,51 @@
         <th>Название</th>
         <th>Инструкции</th>
         <th>Стиль</th>
+        <th></th>
     </tr>
     </thead>
     <tbody>
     {% for personality in personalities %}
     <tr>
         <td>{{ personality.id }}</td>
-        <td>{{ personality.title }}</td>
-        <td>{{ personality.instructions }}</td>
-        <td>{{ personality.style }}</td>
+        <td colspan="4">
+            <form data-method="put" data-redirect="/admin/personalities" action="/admin/personalities/{{ personality.id }}">
+                <div class="columns">
+                    <div class="column is-4">
+                        <div class="field">
+                            <div class="control">
+                                <input class="input" name="title" value="{{ personality.title }}" required>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="column is-4">
+                        <div class="field">
+                            <div class="control">
+                                <textarea class="textarea" name="instructions" rows="4" required>{{ personality.instructions }}</textarea>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="column is-3">
+                        <div class="field">
+                            <div class="control">
+                                <textarea class="textarea" name="style" rows="4">{{ personality.style or '' }}</textarea>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="column is-1">
+                        <div class="buttons is-flex is-flex-direction-column">
+                            <button class="button is-link" type="submit">Сохранить</button>
+                            <button class="button is-danger is-light" type="button" data-delete="/admin/personalities/{{ personality.id }}" data-redirect="/admin/personalities">Удалить</button>
+                        </div>
+                    </div>
+                </div>
+            </form>
+        </td>
     </tr>
     {% endfor %}
     </tbody>
 </table>
+{% if not personalities %}
+<p>Персоналии пока не добавлены.</p>
+{% endif %}
 {% endblock %}

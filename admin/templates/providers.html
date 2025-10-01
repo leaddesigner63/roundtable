@@ -1,28 +1,163 @@
 {% extends "base.html" %}
 {% block content %}
 <h1 class="title">Провайдеры</h1>
+
+<div class="box">
+    <h2 class="title is-4">Добавить провайдера</h2>
+    <form method="post" action="/admin/providers">
+        <div class="columns is-multiline">
+            <div class="column is-4">
+                <div class="field">
+                    <label class="label">Название</label>
+                    <div class="control">
+                        <input class="input" name="name" required>
+                    </div>
+                </div>
+            </div>
+            <div class="column is-4">
+                <div class="field">
+                    <label class="label">Тип</label>
+                    <div class="control">
+                        <input class="input" name="type" required>
+                    </div>
+                </div>
+            </div>
+            <div class="column is-4">
+                <div class="field">
+                    <label class="label">Модель</label>
+                    <div class="control">
+                        <input class="input" name="model_id" required>
+                    </div>
+                </div>
+            </div>
+            <div class="column is-6">
+                <div class="field">
+                    <label class="label">API ключ</label>
+                    <div class="control">
+                        <input class="input" name="api_key" required>
+                    </div>
+                </div>
+            </div>
+            <div class="column is-6">
+                <div class="field">
+                    <label class="label">Параметры (JSON)</label>
+                    <div class="control">
+                        <textarea class="textarea" name="parameters" placeholder="{}"></textarea>
+                    </div>
+                </div>
+            </div>
+            <div class="column is-3">
+                <div class="field">
+                    <label class="label">Порядок</label>
+                    <div class="control">
+                        <input class="input" type="number" name="order_index" value="0">
+                    </div>
+                </div>
+            </div>
+            <div class="column is-3">
+                <div class="field">
+                    <label class="checkbox" style="margin-top: 2rem;">
+                        <input type="checkbox" name="enabled" checked>
+                        Включен
+                    </label>
+                </div>
+            </div>
+            <div class="column is-12">
+                <div class="field is-grouped">
+                    <div class="control">
+                        <button class="button is-primary" type="submit">Создать</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </form>
+</div>
+
 <table class="table is-striped is-fullwidth">
     <thead>
     <tr>
         <th>ID</th>
         <th>Название</th>
         <th>Тип</th>
-        <th>Model</th>
+        <th>Модель</th>
+        <th>Параметры</th>
         <th>Порядок</th>
-        <th>Вкл.</th>
+        <th>Включен</th>
+        <th></th>
     </tr>
     </thead>
     <tbody>
     {% for provider in providers %}
     <tr>
         <td>{{ provider.id }}</td>
-        <td>{{ provider.name }}</td>
-        <td>{{ provider.type }}</td>
-        <td>{{ provider.model_id }}</td>
-        <td>{{ provider.order_index }}</td>
-        <td>{{ provider.enabled }}</td>
+        <td colspan="7">
+            <form data-method="put" data-redirect="/admin/providers" action="/admin/providers/{{ provider.id }}">
+                <div class="columns is-multiline">
+                    <div class="column is-3">
+                        <div class="field">
+                            <div class="control">
+                                <input class="input" name="name" value="{{ provider.name }}" required>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="column is-2">
+                        <div class="field">
+                            <div class="control">
+                                <input class="input" name="type" value="{{ provider.type }}" required>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="column is-3">
+                        <div class="field">
+                            <div class="control">
+                                <input class="input" name="model_id" value="{{ provider.model_id }}" required>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="column is-4">
+                        <div class="field">
+                            <div class="control">
+                                <input class="input" name="api_key" placeholder="Введите новый ключ" required>
+                            </div>
+                            <p class="help">Ключ хранится в зашифрованном виде, укажите новое значение.</p>
+                        </div>
+                    </div>
+                    <div class="column is-6">
+                        <div class="field">
+                            <div class="control">
+                                <textarea class="textarea" name="parameters">{{ provider.parameters | tojson }}</textarea>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="column is-2">
+                        <div class="field">
+                            <div class="control">
+                                <input class="input" type="number" name="order_index" value="{{ provider.order_index }}">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="column is-2">
+                        <div class="field">
+                            <label class="checkbox">
+                                <input type="checkbox" name="enabled" {% if provider.enabled %}checked{% endif %}>
+                                Включен
+                            </label>
+                        </div>
+                    </div>
+                    <div class="column is-2">
+                        <div class="buttons">
+                            <button class="button is-link" type="submit">Сохранить</button>
+                            <button class="button is-danger is-light" type="button" data-delete="/admin/providers/{{ provider.id }}" data-redirect="/admin/providers">Удалить</button>
+                        </div>
+                    </div>
+                </div>
+            </form>
+        </td>
     </tr>
     {% endfor %}
     </tbody>
 </table>
+{% if not providers %}
+<p>Провайдеры пока не добавлены.</p>
+{% endif %}
 {% endblock %}
