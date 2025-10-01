@@ -56,7 +56,12 @@ async def test_orchestrator_runs_rounds(monkeypatch, db_session):
     orchestrator = DialogueOrchestrator(db_session, settings=DummySettings(), secrets=secrets)
     session = await orchestrator.create_session(user_id=123, topic="Будущее ИИ", max_rounds=2)
     await db_session.commit()
-    await orchestrator.start_session(session.id)
+    captured: list[tuple[str, int]] = []
+
+    async def progress(message, round_number: int) -> None:
+        captured.append((message.content, round_number))
+
+    await orchestrator.start_session(session.id, progress_callback=progress)
     await db_session.commit()
 
     stored_session = await db_session.get(Session, session.id)
@@ -68,3 +73,6 @@ async def test_orchestrator_runs_rounds(monkeypatch, db_session):
     assert len(rows) > 0
     messages = stored_session.messages
     assert any(msg.author_name.startswith("OpenAI") for msg in messages)
+    model_messages = [msg for msg in messages if msg.author_type == "model"]
+    assert len(captured) == len(model_messages)
+    assert all(round_number >= 1 for _, round_number in captured)

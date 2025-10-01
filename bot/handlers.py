@@ -5,7 +5,7 @@ from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
-from bot.api_client import api_get, api_post
+from bot.api_client import api_get, api_post, api_post_stream
 from bot.keyboards import main_menu
 from bot.states import DialogueStates
 from core.config import get_settings
@@ -56,10 +56,30 @@ async def receive_topic(message: Message, state: FSMContext) -> None:
     session_id = session["id"]
     await state.update_data(active_session_id=session_id)
     await message.answer("Запускаю обсуждение... это может занять несколько секунд.")
-    await api_post(f"/api/sessions/{session_id}/start", {})
-    info = await api_get(f"/api/sessions/{session_id}")
+    summary: dict | None = None
+    try:
+        async for event in api_post_stream(f"/api/sessions/{session_id}/start", {}):
+            if event.get("type") == "message":
+                author = event.get("author", "Модель")
+                content = event.get("content", "")
+                await message.answer(f"{author}: {content}")
+            elif event.get("type") == "session":
+                summary = event
+    except Exception:
+        await state.clear()
+        await message.answer("Не удалось провести обсуждение. Попробуйте позже.")
+        return
+
     await state.clear()
-    await message.answer(f"Обсуждение завершено. Раундов: {info['current_round']}. Статус: {info['status']}.")
+    if summary:
+        await message.answer(
+            f"Обсуждение завершено. Раундов: {summary.get('current_round', 0)}. Статус: {summary.get('status', 'unknown')}.",
+        )
+    else:
+        info = await api_get(f"/api/sessions/{session_id}")
+        await message.answer(
+            f"Обсуждение завершено. Раундов: {info['current_round']}. Статус: {info['status']}.",
+        )
 
 
 @router.message(Command("stop"))

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
-from typing import Dict, List
+from typing import Awaitable, Callable, Dict, List
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +29,8 @@ from orchestrator.token_counter import estimate_tokens
 
 
 class DialogueOrchestrator:
+    _stop_events: Dict[int, asyncio.Event] = {}
+
     def __init__(self, db: AsyncSession, settings: Settings | None = None, secrets: SecretsManager | None = None) -> None:
         self.db = db
         self.settings = settings or get_settings()
@@ -60,7 +63,11 @@ class DialogueOrchestrator:
         await self._log_action("system", "session_created", {"session_id": session.id})
         return session
 
-    async def start_session(self, session_id: int) -> Session:
+    async def start_session(
+        self,
+        session_id: int,
+        progress_callback: Callable[[Message, int], Awaitable[None]] | None = None,
+    ) -> Session:
         session = await self._load_session(session_id)
         if not session:
             raise ValueError("Session not found")
@@ -68,13 +75,15 @@ class DialogueOrchestrator:
         await self.db.flush()
         await self._ensure_topic_message(session)
         await self._log_action("system", "session_started", {"session_id": session.id})
-        await self._run_dialogue(session)
+        stop_event = self._get_stop_event(session.id)
+        await self._run_dialogue(session, progress_callback=progress_callback, stop_event=stop_event)
         return session
 
     async def stop_session(self, session_id: int, reason: str = "user") -> Session:
         session = await self._load_session(session_id)
         if not session:
             raise ValueError("Session not found")
+        self._trigger_stop(session_id)
         session.status = SessionStatusEnum.STOPPED.value
         session.finished_at = datetime.utcnow()
         await self.db.flush()
@@ -95,13 +104,37 @@ class DialogueOrchestrator:
         )
         return result.scalars().first()
 
-    async def _run_dialogue(self, session: Session) -> None:
+    async def _run_dialogue(
+        self,
+        session: Session,
+        progress_callback: Callable[[Message, int], Awaitable[None]] | None = None,
+        stop_event: asyncio.Event | None = None,
+    ) -> None:
         participant_cache: Dict[int, Dict[str, str | int]] = {}
         session.current_round = 0
+        stop_requested = False
 
         while session.current_round < session.max_rounds:
+            if stop_event and stop_event.is_set():
+                logger.info("Stop signal detected before round for session %s", session.id)
+                stop_requested = True
+                break
+            await self.db.refresh(session, attribute_names=["status"])
+            if session.status == SessionStatusEnum.STOPPED.value:
+                logger.info("Stop requested for session %s", session.id)
+                break
+
             logger.info("Session %s entering round %s", session.id, session.current_round + 1)
+            dialogue_stopped = False
             for participant in sorted(session.participants, key=lambda p: p.order_index):
+                if stop_event and stop_event.is_set():
+                    dialogue_stopped = True
+                    stop_requested = True
+                    break
+                await self.db.refresh(session, attribute_names=["status"])
+                if session.status == SessionStatusEnum.STOPPED.value:
+                    dialogue_stopped = True
+                    break
                 if participant.status != SessionParticipantStatus.ACTIVE.value:
                     continue
                 provider = participant.provider
@@ -163,17 +196,66 @@ class DialogueOrchestrator:
                     },
                 )
 
+                if progress_callback:
+                    await progress_callback(message, session.current_round + 1)
+
+                await asyncio.sleep(0)
+
                 if self._context_exceeds_limit(session):
                     await self._compress_history(session)
+
+                await self.db.refresh(session, attribute_names=["status"])
+                if (stop_event and stop_event.is_set()) or session.status == SessionStatusEnum.STOPPED.value:
+                    dialogue_stopped = True
+                    if stop_event and stop_event.is_set():
+                        stop_requested = True
+                    break
+
+            if dialogue_stopped:
+                break
 
             session.current_round += 1
             if not any(p.status == SessionParticipantStatus.ACTIVE.value for p in session.participants):
                 logger.info("No active participants remaining for session %s", session.id)
                 break
 
-        session.status = SessionStatusEnum.FINISHED.value
-        session.finished_at = datetime.utcnow()
-        await self._log_action("system", "session_finished", {"session_id": session.id, "rounds": session.current_round})
+        await self.db.refresh(session, attribute_names=["status", "finished_at"])
+
+        if session.status != SessionStatusEnum.STOPPED.value and not stop_requested:
+            session.status = SessionStatusEnum.FINISHED.value
+            session.finished_at = datetime.utcnow()
+            await self._log_action(
+                "system",
+                "session_finished",
+                {"session_id": session.id, "rounds": session.current_round},
+            )
+        else:
+            session.status = SessionStatusEnum.STOPPED.value
+            session.finished_at = datetime.utcnow()
+
+        self._clear_stop_event(session.id)
+
+    @classmethod
+    def _get_stop_event(cls, session_id: int) -> asyncio.Event:
+        event = cls._stop_events.get(session_id)
+        if event is None:
+            event = asyncio.Event()
+            cls._stop_events[session_id] = event
+        return event
+
+    @classmethod
+    def _trigger_stop(cls, session_id: int) -> None:
+        event = cls._stop_events.get(session_id)
+        if event is None:
+            event = asyncio.Event()
+            cls._stop_events[session_id] = event
+        event.set()
+
+    @classmethod
+    def _clear_stop_event(cls, session_id: int) -> None:
+        event = cls._stop_events.pop(session_id, None)
+        if event:
+            event.set()
 
     async def _build_adapter(self, provider: Provider):
         api_key = self.secrets.decrypt(provider.api_key_encrypted)

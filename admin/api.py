@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException
+import asyncio
+import json
+from typing import AsyncIterator
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -192,9 +197,71 @@ async def create_session_api(payload: SessionCreate, db: AsyncSession = Depends(
     return session
 
 
+async def _stream_session(
+    orchestrator: DialogueOrchestrator,
+    session_id: int,
+    db: AsyncSession,
+) -> StreamingResponse:
+    queue: asyncio.Queue[str | None] = asyncio.Queue()
+    final_session: Session | None = None
+
+    async def progress_callback(message, round_number: int) -> None:
+        payload = {
+            "type": "message",
+            "id": message.id,
+            "author": message.author_name,
+            "content": message.content,
+            "round": round_number,
+        }
+        await queue.put(json.dumps(payload))
+
+    async def run_dialogue() -> None:
+        nonlocal final_session
+        try:
+            final_session = await orchestrator.start_session(
+                session_id, progress_callback=progress_callback
+            )
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
+        finally:
+            await queue.put(None)
+
+    task = asyncio.create_task(run_dialogue())
+
+    async def iterator() -> AsyncIterator[str]:
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield item + "\n"
+        finally:
+            await task
+        if final_session is not None:
+            await db.refresh(final_session)
+            summary = {
+                "type": "session",
+                "id": final_session.id,
+                "status": final_session.status,
+                "current_round": final_session.current_round,
+                "max_rounds": final_session.max_rounds,
+            }
+            yield json.dumps(summary) + "\n"
+
+    return StreamingResponse(iterator(), media_type="application/jsonl")
+
+
 @api_router.post("/sessions/{session_id}/start", response_model=SessionResponse)
-async def start_session_api(session_id: int, db: AsyncSession = Depends(get_session)) -> Session:
+async def start_session_api(
+    session_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_session),
+) -> Session:
     orchestrator = DialogueOrchestrator(db)
+    if request.query_params.get("stream") == "true":
+        return await _stream_session(orchestrator, session_id, db)
     session = await orchestrator.start_session(session_id)
     await db.commit()
     await db.refresh(session)
