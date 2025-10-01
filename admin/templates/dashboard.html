@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Круглый стол ИИ — админка</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 2rem; }
+      h1 { color: #2c3e50; }
+      table { border-collapse: collapse; width: 100%; margin-bottom: 2rem; }
+      th, td { border: 1px solid #ddd; padding: 8px; }
+      th { background: #f5f5f5; text-align: left; }
+      section { margin-bottom: 3rem; }
+      .grid { display: grid; gap: 2rem; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+      .card { border: 1px solid #ccc; padding: 1rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+      a.button { display: inline-block; margin-top: 1rem; padding: 0.5rem 1rem; background: #2c3e50; color: white; text-decoration: none; border-radius: 4px; }
+    </style>
+  </head>
+  <body>
+    <h1>Административная панель</h1>
+    <section>
+      <h2>Провайдеры</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Название</th>
+            <th>Тип</th>
+            <th>Model ID</th>
+            <th>Активен</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for provider in providers %}
+          <tr>
+            <td>{{ provider.id }}</td>
+            <td>{{ provider.name }}</td>
+            <td>{{ provider.type }}</td>
+            <td>{{ provider.model_id }}</td>
+            <td>{{ 'да' if provider.enabled else 'нет' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Персоналии</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Название</th>
+            <th>Инструкции</th>
+            <th>Стиль</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for personality in personalities %}
+          <tr>
+            <td>{{ personality.id }}</td>
+            <td>{{ personality.title }}</td>
+            <td>{{ personality.instructions }}</td>
+            <td>{{ personality.style }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Сессии</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Тема</th>
+            <th>Статус</th>
+            <th>Раунд</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for session in sessions %}
+          <tr>
+            <td>{{ session.id }}</td>
+            <td>{{ session.topic }}</td>
+            <td>{{ session.status }}</td>
+            <td>{{ session.current_round }}/{{ session.max_rounds }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+
+    <section class="grid">
+      <div class="card">
+        <h3>Ссылка на донат</h3>
+        <p>{{ payment_url }}</p>
+        <a class="button" href="{{ payment_url }}" target="_blank">Открыть страницу оплаты</a>
+      </div>
+    </section>
+  </body>
+</html>
