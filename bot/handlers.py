@@ -1,11 +1,15 @@
 from __future__ import annotations
 
-from aiogram import Router, F
+import html
+from typing import Any
+
+from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
+from httpx import HTTPError
 
-from bot.api_client import api_get, api_post
+from bot.api_client import api_post
 from bot.keyboards import main_menu
 from bot.states import DialogueStates
 from core.config import get_settings
@@ -24,13 +28,17 @@ async def start_handler(message: Message, state: FSMContext) -> None:
 
 
 async def _ensure_user(message: Message) -> None:
-    await api_post(
-        "/api/users",
-        {
-            "telegram_id": message.from_user.id,
-            "username": message.from_user.username,
-        },
-    )
+    try:
+        await api_post(
+            "/api/users",
+            {
+                "telegram_id": message.from_user.id,
+                "username": message.from_user.username,
+            },
+        )
+    except HTTPError:
+        # Не критично, продолжим без сохранения пользователя
+        return
 
 
 @router.message(Command("new"))
@@ -52,14 +60,22 @@ async def receive_topic(message: Message, state: FSMContext) -> None:
         "user_id": message.from_user.id,
         "topic": topic,
     }
-    session = await api_post("/api/sessions", payload)
+    try:
+        session = await api_post("/api/sessions", payload)
+    except HTTPError:
+        await message.answer("Не удалось создать обсуждение. Попробуйте позже.")
+        return
+
     session_id = session["id"]
     await state.update_data(active_session_id=session_id)
     await message.answer("Запускаю обсуждение... это может занять несколько секунд.")
-    await api_post(f"/api/sessions/{session_id}/start", {})
-    info = await api_get(f"/api/sessions/{session_id}")
+    try:
+        started_session = await api_post(f"/api/sessions/{session_id}/start", {})
+    except HTTPError:
+        await message.answer("Не удалось запустить обсуждение. Попробуйте позже.")
+        return
     await state.clear()
-    await message.answer(f"Обсуждение завершено. Раундов: {info['current_round']}. Статус: {info['status']}.")
+    await _send_session_history(message, started_session)
 
 
 @router.message(Command("stop"))
@@ -70,12 +86,46 @@ async def stop_dialogue(message: Message, state: FSMContext) -> None:
     if not session_id:
         await message.answer("Сейчас нет активного обсуждения.")
         return
-    await api_post(f"/api/sessions/{session_id}/stop", {})
+    try:
+        session = await api_post(f"/api/sessions/{session_id}/stop", {"reason": "user"})
+    except HTTPError:
+        await message.answer("Не удалось остановить обсуждение. Попробуйте позже.")
+        return
     await state.clear()
     await message.answer("Диалог остановлен.")
+    await _send_session_history(message, session)
 
 
 @router.message(Command("donate"))
 @router.message(F.text == "Отблагодарить создателя")
 async def donate_handler(message: Message) -> None:
     await message.answer(f"Поддержать проект: {settings.payment_url}")
+
+
+async def _send_session_history(message: Message, session: dict[str, Any]) -> None:
+    rounds_info = f"Раундов: {session.get('current_round', 0)} из {session.get('max_rounds', 0)}."
+    status = session.get("status", "unknown")
+    history = session.get("messages", [])
+    if not history:
+        await message.answer(f"Обсуждение завершено. {rounds_info} Статус: {status}.")
+        return
+
+    total_cost = 0.0
+    for item in history:
+        if item.get("author_type") != "model":
+            continue
+        total_cost += float(item.get("cost", 0.0))
+        author = html.escape(item.get("author_name", "Модель"))
+        content = html.escape(item.get("content", ""))
+        tokens_in = item.get("tokens_in", 0)
+        tokens_out = item.get("tokens_out", 0)
+        text = (
+            f"<b>{author}</b>\n{content}\n\n"
+            f"<i>Входных токенов: {tokens_in}, выходных токенов: {tokens_out}</i>"
+        )
+        await message.answer(text)
+
+    await message.answer(
+        "Обсуждение завершено. "
+        f"{rounds_info} Статус: {status}. Суммарная стоимость: {total_cost:.4f}."
+    )

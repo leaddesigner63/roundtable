@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-from typing import List
+from datetime import datetime
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-from core.config import get_settings
 from core.db import get_session
 from core.models import Personality, Provider, Session, SessionParticipant, Setting, User
 from core.security import get_secrets_manager
@@ -16,17 +17,39 @@ from orchestrator.service import DialogueOrchestrator, get_setting, set_setting
 api_router = APIRouter(prefix="/api")
 
 
+async def _load_session_with_details(db: AsyncSession, session_id: int) -> Session:
+    result = await db.execute(
+        select(Session)
+        .options(
+            selectinload(Session.messages),
+            selectinload(Session.participants)
+            .selectinload(SessionParticipant.provider),
+            selectinload(Session.participants)
+            .selectinload(SessionParticipant.personality),
+        )
+        .where(Session.id == session_id)
+    )
+    session = result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return session
+
+
+async def _session_detail_response(db: AsyncSession, session_id: int) -> SessionDetailResponse:
+    session = await _load_session_with_details(db, session_id)
+    return SessionDetailResponse.model_validate(session)
+
+
 class UserCreate(BaseModel):
     telegram_id: int
     username: str | None = None
 
 
 class UserResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     telegram_id: int
     username: str | None
-
-    class Config:
-        orm_mode = True
 
 
 @api_router.post("/users", response_model=UserResponse, status_code=201)
@@ -46,12 +69,14 @@ class ProviderBase(BaseModel):
     type: str
     api_key: str
     model_id: str
-    parameters: dict = {}
+    parameters: dict = Field(default_factory=dict)
     enabled: bool = True
     order_index: int = 0
 
 
 class ProviderResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     name: str
     type: str
@@ -60,27 +85,21 @@ class ProviderResponse(BaseModel):
     enabled: bool
     order_index: int
 
-    class Config:
-        orm_mode = True
-
 
 @api_router.get("/providers", response_model=List[ProviderResponse])
 async def list_providers(db: AsyncSession = Depends(get_session)) -> List[Provider]:
-    result = await db.execute(select(Provider))
+    result = await db.execute(select(Provider).order_by(Provider.order_index))
     return list(result.scalars().all())
 
 
 @api_router.post("/providers", response_model=ProviderResponse, status_code=201)
 async def create_provider(payload: ProviderBase, db: AsyncSession = Depends(get_session)) -> Provider:
     secrets = get_secrets_manager()
+    data = payload.model_dump()
+    api_key = data.pop("api_key")
     provider = Provider(
-        name=payload.name,
-        type=payload.type,
-        api_key_encrypted=secrets.encrypt(payload.api_key),
-        model_id=payload.model_id,
-        parameters=payload.parameters,
-        enabled=payload.enabled,
-        order_index=payload.order_index,
+        api_key_encrypted=secrets.encrypt(api_key),
+        **data,
     )
     db.add(provider)
     await db.commit()
@@ -94,13 +113,11 @@ async def update_provider(provider_id: int, payload: ProviderBase, db: AsyncSess
     if not provider:
         raise HTTPException(status_code=404, detail="Provider not found")
     secrets = get_secrets_manager()
-    provider.name = payload.name
-    provider.type = payload.type
-    provider.api_key_encrypted = secrets.encrypt(payload.api_key)
-    provider.model_id = payload.model_id
-    provider.parameters = payload.parameters
-    provider.enabled = payload.enabled
-    provider.order_index = payload.order_index
+    data = payload.model_dump()
+    api_key = data.pop("api_key")
+    provider.api_key_encrypted = secrets.encrypt(api_key)
+    for field, value in data.items():
+        setattr(provider, field, value)
     await db.commit()
     await db.refresh(provider)
     return provider
@@ -122,21 +139,20 @@ class PersonalityBase(BaseModel):
 
 
 class PersonalityResponse(PersonalityBase):
-    id: int
+    model_config = ConfigDict(from_attributes=True)
 
-    class Config:
-        orm_mode = True
+    id: int
 
 
 @api_router.get("/personalities", response_model=List[PersonalityResponse])
 async def list_personalities(db: AsyncSession = Depends(get_session)) -> List[Personality]:
-    result = await db.execute(select(Personality))
+    result = await db.execute(select(Personality).order_by(Personality.title))
     return list(result.scalars().all())
 
 
 @api_router.post("/personalities", response_model=PersonalityResponse, status_code=201)
 async def create_personality(payload: PersonalityBase, db: AsyncSession = Depends(get_session)) -> Personality:
-    personality = Personality(**payload.dict())
+    personality = Personality(**payload.model_dump())
     db.add(personality)
     await db.commit()
     await db.refresh(personality)
@@ -148,9 +164,9 @@ async def update_personality(personality_id: int, payload: PersonalityBase, db: 
     personality = await db.get(Personality, personality_id)
     if not personality:
         raise HTTPException(status_code=404, detail="Personality not found")
-    personality.title = payload.title
-    personality.instructions = payload.instructions
-    personality.style = payload.style
+    data = payload.model_dump()
+    for field, value in data.items():
+        setattr(personality, field, value)
     await db.commit()
     await db.refresh(personality)
     return personality
@@ -171,51 +187,82 @@ class SessionCreate(BaseModel):
     max_rounds: int | None = None
 
 
-class SessionResponse(BaseModel):
+class MessageResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    author_type: str
+    author_name: str
+    content: str
+    tokens_in: int
+    tokens_out: int
+    cost: float
+    created_at: datetime
+
+
+class SessionParticipantResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    session_id: int
+    provider_id: int
+    personality_id: int
+    provider_name: str
+    personality_title: str
+    order_index: int
+    status: str
+
+
+class SessionDetailResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     user_id: int
     topic: str
     status: str
     max_rounds: int
     current_round: int
+    created_at: datetime
+    finished_at: datetime | None
+    messages: list[MessageResponse]
+    participants: list[SessionParticipantResponse]
 
-    class Config:
-        orm_mode = True
 
-
-@api_router.post("/sessions", response_model=SessionResponse, status_code=201)
-async def create_session_api(payload: SessionCreate, db: AsyncSession = Depends(get_session)) -> Session:
+@api_router.post("/sessions", response_model=SessionDetailResponse, status_code=201)
+async def create_session_api(payload: SessionCreate, db: AsyncSession = Depends(get_session)) -> SessionDetailResponse:
     orchestrator = DialogueOrchestrator(db)
     session = await orchestrator.create_session(payload.user_id, payload.topic, payload.max_rounds)
     await db.commit()
-    await db.refresh(session)
-    return session
+    return await _session_detail_response(db, session.id)
 
 
-@api_router.post("/sessions/{session_id}/start", response_model=SessionResponse)
-async def start_session_api(session_id: int, db: AsyncSession = Depends(get_session)) -> Session:
+@api_router.post("/sessions/{session_id}/start", response_model=SessionDetailResponse)
+async def start_session_api(session_id: int, db: AsyncSession = Depends(get_session)) -> SessionDetailResponse:
     orchestrator = DialogueOrchestrator(db)
     session = await orchestrator.start_session(session_id)
     await db.commit()
-    await db.refresh(session)
-    return session
+    return await _session_detail_response(db, session.id)
 
 
-@api_router.post("/sessions/{session_id}/stop", response_model=SessionResponse)
-async def stop_session_api(session_id: int, db: AsyncSession = Depends(get_session)) -> Session:
+class StopSessionRequest(BaseModel):
+    reason: Literal["user", "timeout", "limit", "error"] = "user"
+
+
+@api_router.post("/sessions/{session_id}/stop", response_model=SessionDetailResponse)
+async def stop_session_api(
+    session_id: int,
+    payload: Optional[StopSessionRequest] = None,
+    db: AsyncSession = Depends(get_session),
+) -> SessionDetailResponse:
     orchestrator = DialogueOrchestrator(db)
-    session = await orchestrator.stop_session(session_id)
+    session = await orchestrator.stop_session(session_id, reason=(payload.reason if payload else "user"))
     await db.commit()
-    await db.refresh(session)
-    return session
+    return await _session_detail_response(db, session.id)
 
 
-@api_router.get("/sessions/{session_id}", response_model=SessionResponse)
-async def get_session_api(session_id: int, db: AsyncSession = Depends(get_session)) -> Session:
-    session = await db.get(Session, session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-    return session
+@api_router.get("/sessions/{session_id}", response_model=SessionDetailResponse)
+async def get_session_api(session_id: int, db: AsyncSession = Depends(get_session)) -> SessionDetailResponse:
+    return await _session_detail_response(db, session_id)
 
 
 class ParticipantCreate(BaseModel):
@@ -223,20 +270,11 @@ class ParticipantCreate(BaseModel):
     personality_id: int
     order_index: int
 
-
-class ParticipantResponse(BaseModel):
-    id: int
-    session_id: int
-    provider_id: int
-    personality_id: int
-    order_index: int
-    status: str
-
-    class Config:
-        orm_mode = True
-
-
-@api_router.post("/sessions/{session_id}/participants", response_model=ParticipantResponse, status_code=201)
+@api_router.post(
+    "/sessions/{session_id}/participants",
+    response_model=SessionParticipantResponse,
+    status_code=201,
+)
 async def add_participant(session_id: int, payload: ParticipantCreate, db: AsyncSession = Depends(get_session)) -> SessionParticipant:
     session = await db.get(Session, session_id)
     if not session:
@@ -254,6 +292,11 @@ async def add_participant(session_id: int, payload: ParticipantCreate, db: Async
     db.add(participant)
     await db.commit()
     await db.refresh(participant)
+    session_with_details = await _load_session_with_details(db, session_id)
+    for item in session_with_details.participants:
+        if item.id == participant.id:
+            return item
+    await db.refresh(participant, attribute_names=["provider", "personality"])
     return participant
 
 
@@ -271,24 +314,23 @@ class SettingUpdate(BaseModel):
 
 
 class SettingResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     key: str
     value: str
 
-    class Config:
-        orm_mode = True
-
 
 @api_router.get("/settings/{key}", response_model=SettingResponse | None)
-async def get_setting_api(key: str, db: AsyncSession = Depends(get_session)) -> Setting | None:
+async def get_setting_api(key: str, db: AsyncSession = Depends(get_session)) -> SettingResponse | None:
     value = await get_setting(db, key)
     if value is None:
         return None
-    return Setting(key=key, value=value)
+    return SettingResponse(key=key, value=value)
 
 
 @api_router.put("/settings/{key}", response_model=SettingResponse)
-async def set_setting_api(key: str, payload: SettingUpdate, db: AsyncSession = Depends(get_session)) -> Setting:
+async def set_setting_api(key: str, payload: SettingUpdate, db: AsyncSession = Depends(get_session)) -> SettingResponse:
     await set_setting(db, key, payload.value)
     await db.commit()
     value = await get_setting(db, key)
-    return Setting(key=key, value=value or "")
+    return SettingResponse(key=key, value=value or "")

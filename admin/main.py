@@ -6,7 +6,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from admin.api import api_router
+from admin.api import _load_session_with_details, api_router
 from core.config import get_settings
 from core.db import AsyncSessionLocal, get_session
 from core.models import Personality, Provider, Session, Setting
@@ -55,6 +55,23 @@ async def admin_sessions(request: Request, db: AsyncSession = Depends(get_sessio
     result = await db.execute(select(Session).order_by(Session.created_at.desc()))
     sessions = result.scalars().all()
     return templates.TemplateResponse("sessions.html", {"request": request, "title": "Сессии", "sessions": sessions})
+
+
+@app.get("/admin/sessions/{session_id}", response_class=HTMLResponse)
+async def admin_session_detail(request: Request, session_id: int, db: AsyncSession = Depends(get_session)) -> HTMLResponse:
+    session = await _load_session_with_details(db, session_id)
+    total_cost = sum(message.cost for message in session.messages)
+    total_tokens_in = sum(message.tokens_in for message in session.messages)
+    total_tokens_out = sum(message.tokens_out for message in session.messages)
+    context = {
+        "request": request,
+        "title": f"Сессия #{session.id}",
+        "session": session,
+        "total_cost": total_cost,
+        "total_tokens_in": total_tokens_in,
+        "total_tokens_out": total_tokens_out,
+    }
+    return templates.TemplateResponse("session_detail.html", context)
 
 
 @app.get("/admin/settings", response_class=HTMLResponse)

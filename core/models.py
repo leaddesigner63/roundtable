@@ -112,6 +112,14 @@ class SessionParticipant(Base):
     provider: Mapped[Provider] = relationship("Provider", back_populates="participants")
     personality: Mapped[Personality] = relationship("Personality", back_populates="participants")
 
+    @property
+    def provider_name(self) -> str:
+        return self.provider.name if self.provider else ""
+
+    @property
+    def personality_title(self) -> str:
+        return self.personality.title if self.personality else ""
+
 
 class MessageAuthorType(str, PyEnum):
     USER = "user"

@@ -6,6 +6,14 @@ from typing import AsyncGenerator
 
 from cryptography.fernet import Fernet
 
+# Ensure project package modules are importable when tests run without installation
+import sys
+from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
 FERNET_KEY = Fernet.generate_key().decode()
 os.environ.setdefault("TELEGRAM_BOT_TOKEN", "TEST_TOKEN")
 os.environ.setdefault("SECRETS_KEY", FERNET_KEY)
