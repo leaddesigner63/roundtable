@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +25,13 @@ from core.models import (
 )
 from core.security import SecretsManager, get_secrets_manager
 from orchestrator.token_counter import estimate_tokens
+
+
+SESSION_LIMIT_SETTING_CASTERS: dict[str, Tuple[type, str]] = {
+    "session_tokens_in_limit": (int, "tokens_in"),
+    "session_tokens_out_limit": (int, "tokens_out"),
+    "session_cost_limit": (float, "cost"),
+}
 
 
 class DialogueOrchestrator:
@@ -98,12 +105,30 @@ class DialogueOrchestrator:
     async def _run_dialogue(self, session: Session) -> None:
         participant_cache: Dict[int, Dict[str, str | int]] = {}
         session.current_round = 0
+        totals = self._initial_session_totals(session)
+        limits = await self._load_limit_settings()
+        stop_action: str | None = None
+        stop_meta: dict[str, object] = {}
 
         while session.current_round < session.max_rounds:
+            round_start = datetime.utcnow()
             logger.info("Session %s entering round %s", session.id, session.current_round + 1)
             for participant in sorted(session.participants, key=lambda p: p.order_index):
                 if participant.status != SessionParticipantStatus.ACTIVE.value:
                     continue
+
+                if self._round_timed_out(round_start):
+                    stop_action = "session_timeout"
+                    stop_meta = {
+                        "session_id": session.id,
+                        "round": session.current_round + 1,
+                        "timeout_sec": self.settings.turn_timeout_sec,
+                    }
+                    logger.warning(
+                        "Session %s timed out before participant %s", session.id, participant.id
+                    )
+                    break
+
                 provider = participant.provider
                 personality = participant.personality
                 adapter = await self._build_adapter(provider)
@@ -139,6 +164,9 @@ class DialogueOrchestrator:
                 tokens_in = int(metadata.get("prompt_tokens", estimate_tokens(prompt)))
                 tokens_out = int(metadata.get("completion_tokens", estimate_tokens(reply)))
                 cost = float(metadata.get("cost", 0.0))
+                totals["tokens_in"] += tokens_in
+                totals["tokens_out"] += tokens_out
+                totals["cost"] += cost
                 message = Message(
                     session_id=session.id,
                     author_type=MessageAuthorType.MODEL.value,
@@ -163,13 +191,41 @@ class DialogueOrchestrator:
                     },
                 )
 
+                limit_exceeded, limit_meta = self._check_limits(totals, limits)
+                if limit_exceeded:
+                    stop_action = "session_limit_reached"
+                    stop_meta = {"session_id": session.id, **limit_meta}
+                    logger.warning(
+                        "Session %s reached limit for %s", session.id, limit_meta.get("limit_type")
+                    )
+                    break
+
+                if self._round_timed_out(round_start):
+                    stop_action = "session_timeout"
+                    stop_meta = {
+                        "session_id": session.id,
+                        "round": session.current_round + 1,
+                        "timeout_sec": self.settings.turn_timeout_sec,
+                    }
+                    logger.warning("Session %s timed out during round", session.id)
+                    break
+
                 if self._context_exceeds_limit(session):
                     await self._compress_history(session)
+
+            if stop_action:
+                break
 
             session.current_round += 1
             if not any(p.status == SessionParticipantStatus.ACTIVE.value for p in session.participants):
                 logger.info("No active participants remaining for session %s", session.id)
                 break
+
+        if stop_action:
+            session.status = SessionStatusEnum.STOPPED.value
+            session.finished_at = datetime.utcnow()
+            await self._log_action("system", stop_action, stop_meta)
+            return
 
         session.status = SessionStatusEnum.FINISHED.value
         session.finished_at = datetime.utcnow()
@@ -226,6 +282,48 @@ class DialogueOrchestrator:
         log = AuditLog(actor=actor, action=action, meta=meta)
         self.db.add(log)
         await self.db.flush()
+
+    def _initial_session_totals(self, session: Session) -> dict[str, float]:
+        return {
+            "tokens_in": sum(message.tokens_in for message in session.messages),
+            "tokens_out": sum(message.tokens_out for message in session.messages),
+            "cost": sum(message.cost for message in session.messages),
+        }
+
+    async def _load_limit_settings(self) -> dict[str, float]:
+        limits: dict[str, float] = {
+            "tokens_in": self.settings.session_tokens_in_limit,
+            "tokens_out": self.settings.session_tokens_out_limit,
+            "cost": self.settings.session_cost_limit,
+        }
+        for key, (caster, alias) in SESSION_LIMIT_SETTING_CASTERS.items():
+            raw_value = await get_setting(self.db, key)
+            if raw_value is None:
+                continue
+            try:
+                limits[alias] = caster(raw_value)
+            except (TypeError, ValueError):
+                logger.warning("Invalid value for %s: %s", key, raw_value)
+        return limits
+
+    def _check_limits(self, totals: dict[str, float], limits: dict[str, float]) -> tuple[bool, dict[str, float]]:
+        for limit_type, current_value in totals.items():
+            limit_value = limits.get(limit_type)
+            if limit_value is None or limit_value <= 0:
+                continue
+            if current_value >= limit_value:
+                return True, {
+                    "limit_type": limit_type,
+                    "limit_value": limit_value,
+                    "current_value": current_value,
+                }
+        return False, {}
+
+    def _round_timed_out(self, round_start: datetime) -> bool:
+        timeout = self.settings.turn_timeout_sec
+        if timeout is None or timeout <= 0:
+            return False
+        return (datetime.utcnow() - round_start).total_seconds() >= timeout
 
     async def _ensure_topic_message(self, session: Session) -> None:
         if any(msg.author_type == MessageAuthorType.USER.value for msg in session.messages):
