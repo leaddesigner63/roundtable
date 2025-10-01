@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
-from typing import Awaitable, Callable, Dict, List
+from typing import Awaitable, Callable, Dict, List, Tuple
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -113,6 +113,7 @@ class DialogueOrchestrator:
         participant_cache: Dict[int, Dict[str, str | int]] = {}
         session.current_round = 0
         stop_requested = False
+        stop_reason: str | None = None
 
         while session.current_round < session.max_rounds:
             if stop_event and stop_event.is_set():
@@ -143,7 +144,24 @@ class DialogueOrchestrator:
                 prompt = self._build_prompt(session.topic, personality.instructions, personality.style)
                 context_messages = self._build_context(session)
                 try:
-                    reply, metadata = await adapter.complete(prompt=prompt, context=context_messages)
+                    reply, metadata = await asyncio.wait_for(
+                        adapter.complete(prompt=prompt, context=context_messages),
+                        timeout=self.settings.turn_timeout_sec,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "Provider %s timed out for session %s", provider.name, session.id
+                    )
+                    participant.status = SessionParticipantStatus.SUSPENDED.value
+                    stop_reason = "timeout"
+                    await self._log_action(
+                        "system",
+                        "turn_timeout",
+                        {"session_id": session.id, "provider": provider.name},
+                    )
+                    stop_requested = True
+                    dialogue_stopped = True
+                    break
                 except Exception as exc:  # pragma: no cover - network issues
                     logger.exception("Provider %s failed: %s", provider.name, exc)
                     participant.status = SessionParticipantStatus.SUSPENDED.value
@@ -201,8 +219,28 @@ class DialogueOrchestrator:
 
                 await asyncio.sleep(0)
 
-                if self._context_exceeds_limit(session):
+                while self._context_exceeds_limit(session):
                     await self._compress_history(session)
+
+                limit_result = self._check_usage_limits(session)
+                if limit_result:
+                    limit_reason, total_tokens, total_cost = limit_result
+                    await self._log_action(
+                        "system",
+                        "usage_limit_reached",
+                        {
+                            "session_id": session.id,
+                            "reason": limit_reason,
+                            "tokens": total_tokens,
+                            "cost": total_cost,
+                        },
+                    )
+                    stop_reason = limit_reason
+                    stop_requested = True
+                    dialogue_stopped = True
+                    session.status = SessionStatusEnum.STOPPED.value
+                    session.finished_at = datetime.utcnow()
+                    break
 
                 await self.db.refresh(session, attribute_names=["status"])
                 if (stop_event and stop_event.is_set()) or session.status == SessionStatusEnum.STOPPED.value:
@@ -232,6 +270,12 @@ class DialogueOrchestrator:
         else:
             session.status = SessionStatusEnum.STOPPED.value
             session.finished_at = datetime.utcnow()
+            if stop_reason:
+                await self._log_action(
+                    "system",
+                    "session_stopped",
+                    {"session_id": session.id, "reason": stop_reason},
+                )
 
         self._clear_stop_event(session.id)
 
@@ -287,6 +331,8 @@ class DialogueOrchestrator:
         context: List[dict[str, str]] = [{"role": "system", "content": f"Topic: {session.topic}"}]
         for message in session.messages:
             role = "assistant" if message.author_type == MessageAuthorType.MODEL.value else "user"
+            if not message.content:
+                continue
             context.append({"role": role, "content": message.content})
         return context
 
@@ -297,12 +343,76 @@ class DialogueOrchestrator:
     async def _compress_history(self, session: Session) -> None:
         if not session.messages:
             return
-        # naive compression: keep last half of messages
-        cutoff = len(session.messages) // 2
-        to_remove = session.messages[:cutoff]
-        for message in to_remove:
-            await self.db.execute(update(Message).where(Message.id == message.id).values(content="[compressed]"))
-        await self._log_action("system", "history_compressed", {"session_id": session.id, "removed": cutoff})
+        ordered_messages = sorted(session.messages, key=lambda msg: msg.created_at)
+        if len(ordered_messages) <= 2:
+            return
+        preserved_tail = ordered_messages[-3:]
+        to_compress = [
+            msg
+            for msg in ordered_messages
+            if msg not in preserved_tail
+            and msg.author_type != MessageAuthorType.SYSTEM.value
+            and msg.content
+        ]
+        if not to_compress:
+            return
+
+        summary_parts: List[str] = []
+        for message in to_compress:
+            snippet = message.content.strip().replace("\n", " ")
+            if len(snippet) > 200:
+                snippet = snippet[:200].rsplit(" ", 1)[0] + "…"
+            summary_parts.append(f"{message.author_name}: {snippet}")
+
+        summary_text = "Сводка предыдущего обсуждения:\n" + "\n".join(summary_parts)
+        summary_message = Message(
+            session_id=session.id,
+            author_type=MessageAuthorType.SYSTEM.value,
+            author_name="orchestrator",
+            content=summary_text.strip(),
+            tokens_in=estimate_tokens(summary_text),
+            tokens_out=0,
+            cost=0.0,
+        )
+        self.db.add(summary_message)
+        await self.db.flush()
+        session.messages.append(summary_message)
+
+        for message in to_compress:
+            message.content = ""
+            message.tokens_in = 0
+            message.tokens_out = 0
+
+        await self._log_action(
+            "system",
+            "history_compressed",
+            {"session_id": session.id, "compressed": len(to_compress)},
+        )
+
+    def _calculate_usage(self, session: Session) -> Tuple[int, float]:
+        total_tokens = sum((msg.tokens_in or 0) + (msg.tokens_out or 0) for msg in session.messages)
+        total_cost = sum(msg.cost or 0.0 for msg in session.messages)
+        return total_tokens, total_cost
+
+    def _check_usage_limits(self, session: Session) -> Tuple[str, int, float] | None:
+        total_tokens, total_cost = self._calculate_usage(session)
+        if (
+            getattr(self.settings, "max_session_tokens", None)
+            and total_tokens > self.settings.max_session_tokens
+        ):
+            logger.info(
+                "Session %s exceeded token limit %s", session.id, self.settings.max_session_tokens
+            )
+            return "token_limit", total_tokens, total_cost
+        if (
+            getattr(self.settings, "max_cost_per_session", None)
+            and total_cost > self.settings.max_cost_per_session
+        ):
+            logger.info(
+                "Session %s exceeded cost limit %s", session.id, self.settings.max_cost_per_session
+            )
+            return "cost_limit", total_tokens, total_cost
+        return None
 
     async def _log_action(self, actor: str, action: str, meta: dict) -> None:
         log = AuditLog(actor=actor, action=action, meta=meta)
