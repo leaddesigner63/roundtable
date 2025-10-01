@@ -6,14 +6,22 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-from core.config import get_settings
 from core.db import get_session
 from core.models import Personality, Provider, Session, SessionParticipant, Setting, User
 from core.security import get_secrets_manager
+from orchestrator.schemas import MessageSchema
 from orchestrator.service import DialogueOrchestrator, get_setting, set_setting
 
 api_router = APIRouter(prefix="/api")
+
+
+async def _load_session_with_messages(db: AsyncSession, session_id: int) -> Session | None:
+    result = await db.execute(
+        select(Session).options(selectinload(Session.messages)).where(Session.id == session_id)
+    )
+    return result.scalars().first()
 
 
 class UserCreate(BaseModel):
@@ -178,6 +186,7 @@ class SessionResponse(BaseModel):
     status: str
     max_rounds: int
     current_round: int
+    messages: List[MessageSchema]
 
     class Config:
         orm_mode = True
@@ -188,8 +197,10 @@ async def create_session_api(payload: SessionCreate, db: AsyncSession = Depends(
     orchestrator = DialogueOrchestrator(db)
     session = await orchestrator.create_session(payload.user_id, payload.topic, payload.max_rounds)
     await db.commit()
-    await db.refresh(session)
-    return session
+    reloaded = await _load_session_with_messages(db, session.id)
+    if not reloaded:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return reloaded
 
 
 @api_router.post("/sessions/{session_id}/start", response_model=SessionResponse)
@@ -197,8 +208,10 @@ async def start_session_api(session_id: int, db: AsyncSession = Depends(get_sess
     orchestrator = DialogueOrchestrator(db)
     session = await orchestrator.start_session(session_id)
     await db.commit()
-    await db.refresh(session)
-    return session
+    reloaded = await _load_session_with_messages(db, session.id)
+    if not reloaded:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return reloaded
 
 
 @api_router.post("/sessions/{session_id}/stop", response_model=SessionResponse)
@@ -206,13 +219,15 @@ async def stop_session_api(session_id: int, db: AsyncSession = Depends(get_sessi
     orchestrator = DialogueOrchestrator(db)
     session = await orchestrator.stop_session(session_id)
     await db.commit()
-    await db.refresh(session)
-    return session
+    reloaded = await _load_session_with_messages(db, session.id)
+    if not reloaded:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return reloaded
 
 
 @api_router.get("/sessions/{session_id}", response_model=SessionResponse)
 async def get_session_api(session_id: int, db: AsyncSession = Depends(get_session)) -> Session:
-    session = await db.get(Session, session_id)
+    session = await _load_session_with_messages(db, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     return session
