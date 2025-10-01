@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from core.models import Personality, Provider, Session, SessionParticipant, User
+from core.models import Personality, Provider, Session, SessionParticipant, SessionStatusEnum, User
 from core.security import SecretsManager
 from orchestrator.service import DialogueOrchestrator
 
@@ -53,10 +53,21 @@ async def test_orchestrator_runs_rounds(monkeypatch, db_session):
 
     monkeypatch.setattr("orchestrator.service.create_adapter", adapter_factory)
 
+    import worker.tasks as worker_tasks
+
+    scheduled: list[int] = []
+
+    monkeypatch.setattr(worker_tasks.run_session, "delay", lambda session_id: scheduled.append(session_id))
+
     orchestrator = DialogueOrchestrator(db_session, settings=DummySettings(), secrets=secrets)
     session = await orchestrator.create_session(user_id=123, topic="Будущее ИИ", max_rounds=2)
     await db_session.commit()
+
     await orchestrator.start_session(session.id)
+    assert scheduled == [session.id]
+    await db_session.commit()
+
+    await orchestrator.run_session(session.id)
     await db_session.commit()
 
     stored_session = await db_session.get(Session, session.id)
@@ -68,3 +79,67 @@ async def test_orchestrator_runs_rounds(monkeypatch, db_session):
     assert len(rows) > 0
     messages = stored_session.messages
     assert any(msg.author_name.startswith("OpenAI") for msg in messages)
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_stops_when_session_stopped(monkeypatch, db_session):
+    secrets = SecretsManager()
+    provider = Provider(
+        name="OpenAI",
+        type="openai",
+        api_key_encrypted=secrets.encrypt("key"),
+        model_id="gpt",
+        parameters={},
+        enabled=True,
+        order_index=0,
+    )
+    personality = Personality(title="Expert", instructions="Будь аналитиком", style="Сдержанный")
+    user = User(telegram_id=123, username="tester")
+    db_session.add_all([provider, personality, user])
+    await db_session.commit()
+
+    pause_event = asyncio.Event()
+    resume_event = asyncio.Event()
+
+    class PausingAdapter:
+        def __init__(self) -> None:
+            self.counter = 0
+
+        async def complete(self, prompt: str, context):
+            self.counter += 1
+            if self.counter == 1:
+                pause_event.set()
+                await resume_event.wait()
+            return f"Ответ {self.counter}", {"prompt_tokens": 5, "completion_tokens": 5, "cost": 0.001}
+
+    pausing_adapter = PausingAdapter()
+
+    monkeypatch.setattr("orchestrator.service.create_adapter", lambda *args, **kwargs: pausing_adapter)
+
+    import worker.tasks as worker_tasks
+
+    monkeypatch.setattr(worker_tasks.run_session, "delay", lambda session_id: None)
+
+    orchestrator = DialogueOrchestrator(db_session, settings=DummySettings(), secrets=secrets)
+    session = await orchestrator.create_session(user_id=123, topic="Стоп-тест", max_rounds=3)
+    await db_session.commit()
+
+    await orchestrator.start_session(session.id)
+    await db_session.commit()
+
+    run_task = asyncio.create_task(orchestrator.run_session(session.id))
+    await pause_event.wait()
+
+    from core import db as core_db
+
+    async with core_db.AsyncSessionLocal() as stop_session:
+        stop_orchestrator = DialogueOrchestrator(stop_session, settings=DummySettings(), secrets=secrets)
+        await stop_orchestrator.stop_session(session.id)
+        await stop_session.commit()
+
+    resume_event.set()
+    await run_task
+    await db_session.commit()
+
+    stored_session = await db_session.get(Session, session.id)
+    assert stored_session.status == SessionStatusEnum.STOPPED.value

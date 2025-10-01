@@ -14,7 +14,7 @@ def run_session(session_id: int) -> None:
     async def _run() -> None:
         async with AsyncSessionLocal() as db:
             orchestrator = DialogueOrchestrator(db, settings=settings)
-            await orchestrator.start_session(session_id)
+            await orchestrator.run_session(session_id)
             await db.commit()
 
     import asyncio

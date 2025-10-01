@@ -64,10 +64,38 @@ class DialogueOrchestrator:
         session = await self._load_session(session_id)
         if not session:
             raise ValueError("Session not found")
+        if session.status in {SessionStatusEnum.FINISHED.value, SessionStatusEnum.STOPPED.value}:
+            raise ValueError("Session already completed")
+        if session.status == SessionStatusEnum.RUNNING.value:
+            logger.info("Session %s already running", session.id)
+            return session
+
         session.status = SessionStatusEnum.RUNNING.value
+        session.finished_at = None
         await self.db.flush()
         await self._ensure_topic_message(session)
         await self._log_action("system", "session_started", {"session_id": session.id})
+
+        try:
+            from worker.tasks import run_session as run_session_task
+
+            run_session_task.delay(session.id)
+        except Exception:  # pragma: no cover - Celery misconfiguration
+            logger.exception("Failed to dispatch session %s to background worker", session.id)
+        return session
+
+    async def run_session(self, session_id: int) -> Session:
+        session = await self._load_session(session_id)
+        if not session:
+            raise ValueError("Session not found")
+        if session.status == SessionStatusEnum.STOPPED.value:
+            logger.info("Session %s already stopped", session.id)
+            return session
+        if session.status != SessionStatusEnum.RUNNING.value:
+            logger.info("Session %s is not in running state (current: %s)", session.id, session.status)
+            return session
+
+        await self._ensure_topic_message(session)
         await self._run_dialogue(session)
         return session
 
@@ -100,10 +128,21 @@ class DialogueOrchestrator:
         session.current_round = 0
 
         while session.current_round < session.max_rounds:
+            await self.db.refresh(session, attribute_names=["status"])
+            if session.status == SessionStatusEnum.STOPPED.value:
+                logger.info("Session %s stopped before round %s", session.id, session.current_round + 1)
+                return
+
             logger.info("Session %s entering round %s", session.id, session.current_round + 1)
             for participant in sorted(session.participants, key=lambda p: p.order_index):
                 if participant.status != SessionParticipantStatus.ACTIVE.value:
                     continue
+                await self.db.refresh(session, attribute_names=["status"])
+                if session.status == SessionStatusEnum.STOPPED.value:
+                    logger.info(
+                        "Session %s stopped during round %s", session.id, session.current_round + 1
+                    )
+                    return
                 provider = participant.provider
                 personality = participant.personality
                 adapter = await self._build_adapter(provider)
@@ -170,6 +209,10 @@ class DialogueOrchestrator:
             if not any(p.status == SessionParticipantStatus.ACTIVE.value for p in session.participants):
                 logger.info("No active participants remaining for session %s", session.id)
                 break
+
+        if session.status == SessionStatusEnum.STOPPED.value:
+            logger.info("Session %s marked as stopped", session.id)
+            return
 
         session.status = SessionStatusEnum.FINISHED.value
         session.finished_at = datetime.utcnow()
