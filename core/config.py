@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     max_rounds: int = 5
     turn_timeout_sec: int = 60
     context_token_limit: int = 6000
+    max_session_tokens: int = 20000
+    max_cost_per_session: float = 10.0
     payment_url: AnyHttpUrl
     openai_api_key: str
     openai_model: str = "gpt-4o-mini"
