@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="title">Сессия #{{ session.id }}</h1>
+<div class="box">
+    <div class="columns">
+        <div class="column">
+            <p><strong>Пользователь:</strong> {{ session.user_id }}</p>
+            <p><strong>Тема:</strong> {{ session.topic }}</p>
+            <p><strong>Статус:</strong> {{ session.status }}</p>
+        </div>
+        <div class="column">
+            <p><strong>Раунд:</strong> {{ session.current_round }} / {{ session.max_rounds }}</p>
+            <p><strong>Создана:</strong> {{ session.created_at }}</p>
+            <p><strong>Завершена:</strong> {{ session.finished_at or "—" }}</p>
+        </div>
+    </div>
+    <div class="buttons">
+        <a class="button" href="/admin/sessions">Назад к списку</a>
+        <form class="stop-session-form" method="post" action="/api/sessions/{{ session.id }}/stop">
+            <button class="button is-danger is-light" type="submit" {% if session.status != 'running' %}disabled{% endif %}>Остановить</button>
+        </form>
+    </div>
+</div>
+
+<h2 class="subtitle">История сообщений</h2>
+{% if session.messages %}
+<div class="timeline">
+    {% for message in session.messages %}
+    <div class="box mb-4">
+        <div class="is-flex is-justify-content-space-between is-align-items-center mb-2">
+            <div>
+                <span class="tag is-info is-light">{{ message.author_type }}</span>
+                <strong class="ml-2">{{ message.author_name }}</strong>
+            </div>
+            <small>{{ message.created_at }}</small>
+        </div>
+        <div class="content">
+            <p>{{ message.content }}</p>
+        </div>
+        <div class="tags">
+            <span class="tag is-light">Tokens in: {{ message.tokens_in }}</span>
+            <span class="tag is-light">Tokens out: {{ message.tokens_out }}</span>
+            <span class="tag is-light">Cost: {{ "%.4f" | format(message.cost) }}</span>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<p>Сообщений пока нет.</p>
+{% endif %}
+
+<script>
+const stopForm = document.querySelector('.stop-session-form');
+if (stopForm) {
+    stopForm.addEventListener('submit', async function(event) {
+        event.preventDefault();
+        const button = stopForm.querySelector('button[type="submit"]');
+        if (button) {
+            button.classList.add('is-loading');
+        }
+        try {
+            const response = await fetch(stopForm.action, {method: 'POST'});
+            if (response.ok) {
+                window.location.reload();
+            }
+        } finally {
+            if (button) {
+                button.classList.remove('is-loading');
+            }
+        }
+    });
+}
+</script>
+{% endblock %}
