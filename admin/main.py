@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from admin.api import api_router
 from core.config import get_settings
 from core.db import AsyncSessionLocal, get_session
-from core.models import Personality, Provider, Session, Setting
+from core.models import Personality, Provider, Session, SessionParticipant, Setting
 from orchestrator.service import DialogueOrchestrator
 
 app = FastAPI(title="Roundtable AI")
@@ -55,6 +56,32 @@ async def admin_sessions(request: Request, db: AsyncSession = Depends(get_sessio
     result = await db.execute(select(Session).order_by(Session.created_at.desc()))
     sessions = result.scalars().all()
     return templates.TemplateResponse("sessions.html", {"request": request, "title": "Сессии", "sessions": sessions})
+
+
+@app.get("/admin/sessions/{session_id}", response_class=HTMLResponse)
+async def admin_session_detail(
+    session_id: int, request: Request, db: AsyncSession = Depends(get_session)
+) -> HTMLResponse:
+    result = await db.execute(
+        select(Session)
+        .options(
+            selectinload(Session.messages),
+            selectinload(Session.participants).selectinload(SessionParticipant.provider),
+            selectinload(Session.participants).selectinload(SessionParticipant.personality),
+        )
+        .where(Session.id == session_id)
+    )
+    session = result.scalars().unique().one_or_none()
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return templates.TemplateResponse(
+        "session_detail.html",
+        {
+            "request": request,
+            "title": f"Сессия #{session.id}",
+            "session": session,
+        },
+    )
 
 
 @app.get("/admin/settings", response_class=HTMLResponse)
