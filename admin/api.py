@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import List
 
 import asyncio
@@ -8,9 +9,10 @@ from typing import AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from core.config import get_settings
 from core.db import get_session
@@ -188,6 +190,25 @@ class SessionResponse(BaseModel):
         orm_mode = True
 
 
+class MessageResponse(BaseModel):
+    id: int
+    session_id: int
+    author_type: str
+    author_name: str
+    content: str
+    tokens_in: int
+    tokens_out: int
+    cost: float
+    created_at: datetime
+
+    class Config:
+        orm_mode = True
+
+
+class SessionDetailResponse(SessionResponse):
+    messages: list[MessageResponse] = Field(default_factory=list)
+
+
 @api_router.post("/sessions", response_model=SessionResponse, status_code=201)
 async def create_session_api(payload: SessionCreate, db: AsyncSession = Depends(get_session)) -> Session:
     orchestrator = DialogueOrchestrator(db)
@@ -277,9 +298,14 @@ async def stop_session_api(session_id: int, db: AsyncSession = Depends(get_sessi
     return session
 
 
-@api_router.get("/sessions/{session_id}", response_model=SessionResponse)
+@api_router.get("/sessions/{session_id}", response_model=SessionDetailResponse)
 async def get_session_api(session_id: int, db: AsyncSession = Depends(get_session)) -> Session:
-    session = await db.get(Session, session_id)
+    result = await db.execute(
+        select(Session)
+        .options(selectinload(Session.messages))
+        .where(Session.id == session_id)
+    )
+    session = result.scalars().first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     return session

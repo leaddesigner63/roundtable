@@ -73,7 +73,14 @@ async def test_full_session_flow(monkeypatch):
 
         response = await client.get(f"/api/sessions/{session_id}")
         assert response.status_code == 200
-        assert response.json()["id"] == session_id
+        session_data = response.json()
+        assert session_data["id"] == session_id
+        history = session_data.get("messages", [])
+        assert len(history) >= 2
+        assert history[0]["author_type"] == "user"
+        assert history[0]["content"].startswith("Тема обсуждения")
+        assert history[-1]["author_type"] == "model"
+        assert history[-1]["content"] == "Ответ API 1"
 
 
 @pytest.mark.asyncio
@@ -130,6 +137,14 @@ async def test_streaming_session_flow(monkeypatch):
         assert events[-1]["type"] == "session"
         assert events[-1]["status"] == "finished"
         assert events[-1]["current_round"] == 2
+
+        response = await client.get(f"/api/sessions/{session_id}")
+        assert response.status_code == 200
+        session_data = response.json()
+        history = session_data.get("messages", [])
+        assert len(history) >= len(message_events) + 1
+        model_history = [msg["content"] for msg in history if msg["author_type"] == "model"]
+        assert model_history == [event["content"] for event in message_events]
 
 
 @pytest.mark.asyncio
