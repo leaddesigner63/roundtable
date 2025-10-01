@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="title">{{ title }}</h1>
+{% if errors %}
+<div class="notification is-danger">
+    <ul>
+        {% for error in errors %}
+        <li>{{ error }}</li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+<form method="post" action="{{ form_action }}">
+    <div class="field">
+        <label class="label">Название</label>
+        <div class="control">
+            <input class="input" type="text" name="title" value="{{ form.title }}" required>
+        </div>
+    </div>
+    <div class="field">
+        <label class="label">Инструкции</label>
+        <div class="control">
+            <textarea class="textarea" name="instructions" rows="6" required>{{ form.instructions }}</textarea>
+        </div>
+    </div>
+    <div class="field">
+        <label class="label">Стиль (опционально)</label>
+        <div class="control">
+            <textarea class="textarea" name="style" rows="4">{{ form.style }}</textarea>
+        </div>
+    </div>
+    <div class="field is-grouped">
+        <div class="control">
+            <button class="button is-primary" type="submit">Сохранить</button>
+        </div>
+        <div class="control">
+            <a class="button is-light" href="/admin/personalities">Отмена</a>
+        </div>
+    </div>
+</form>
+{% endblock %}

@@ -1,20 +1,79 @@
 {% extends "base.html" %}
 {% block content %}
 <h1 class="title">Настройки</h1>
+
+{% if errors %}
+<div class="notification is-danger">
+    <ul>
+        {% for error in errors %}
+        <li>{{ error }}</li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+
+<div class="box">
+    <h2 class="subtitle is-5">Добавить или обновить настройку</h2>
+    <form method="post" action="/admin/settings/new">
+        <div class="columns">
+            <div class="column">
+                <div class="field">
+                    <label class="label">Ключ</label>
+                    <div class="control">
+                        <input class="input" type="text" name="key" value="{{ form.key if form else '' }}" placeholder="Например, PAYMENT_URL" required>
+                    </div>
+                </div>
+            </div>
+            <div class="column">
+                <div class="field">
+                    <label class="label">Значение</label>
+                    <div class="control">
+                        <input class="input" type="text" name="value" value="{{ form.value if form else '' }}" required>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="field is-grouped">
+            <div class="control">
+                <button class="button is-primary" type="submit">Сохранить</button>
+            </div>
+        </div>
+    </form>
+</div>
+
 <table class="table is-fullwidth">
     <thead>
     <tr>
         <th>Ключ</th>
         <th>Значение</th>
+        <th></th>
     </tr>
     </thead>
     <tbody>
     {% for item in settings %}
     <tr>
         <td>{{ item.key }}</td>
-        <td>{{ item.value }}</td>
+        <td>
+            <form method="post" action="/admin/settings/{{ item.key }}/update" class="is-flex" style="gap: 0.5rem; align-items: center;">
+                <input class="input" type="text" name="value" value="{{ item.value }}" style="flex: 1;">
+                <button class="button is-small is-link" type="submit">Обновить</button>
+            </form>
+        </td>
+        <td class="has-text-right">
+            <form method="post" action="/admin/settings/{{ item.key }}/delete" style="display:inline">
+                <button class="button is-small is-danger" type="submit" onclick="return confirm('Удалить настройку {{ item.key }}?');">Удалить</button>
+            </form>
+        </td>
+    </tr>
+    {% else %}
+    <tr>
+        <td colspan="3" class="has-text-centered has-text-grey">Настроек пока нет</td>
     </tr>
     {% endfor %}
     </tbody>
 </table>
+
+<div class="notification is-light">
+    <strong>PAYMENT_URL</strong> можно изменить прямо в таблице выше. Изменение сразу сохранится после нажатия «Обновить».
+</div>
 {% endblock %}

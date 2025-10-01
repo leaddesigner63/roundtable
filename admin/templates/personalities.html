@@ -1,6 +1,18 @@
 {% extends "base.html" %}
 {% block content %}
-<h1 class="title">Персоналии</h1>
+<div class="level">
+    <div class="level-left">
+        <div class="level-item">
+            <h1 class="title">Персоналии</h1>
+        </div>
+    </div>
+    <div class="level-right">
+        <div class="level-item">
+            <a class="button is-primary" href="/admin/personalities/new">Добавить персоналию</a>
+        </div>
+    </div>
+</div>
+
 <table class="table is-striped is-fullwidth">
     <thead>
     <tr>
@@ -8,6 +20,7 @@
         <th>Название</th>
         <th>Инструкции</th>
         <th>Стиль</th>
+        <th></th>
     </tr>
     </thead>
     <tbody>
@@ -15,8 +28,18 @@
     <tr>
         <td>{{ personality.id }}</td>
         <td>{{ personality.title }}</td>
-        <td>{{ personality.instructions }}</td>
-        <td>{{ personality.style }}</td>
+        <td><pre style="white-space: pre-wrap">{{ personality.instructions }}</pre></td>
+        <td><pre style="white-space: pre-wrap">{{ personality.style }}</pre></td>
+        <td class="has-text-right">
+            <a class="button is-small is-info" href="/admin/personalities/{{ personality.id }}/edit">Редактировать</a>
+            <form method="post" action="/admin/personalities/{{ personality.id }}/delete" style="display:inline">
+                <button class="button is-small is-danger" type="submit" onclick="return confirm('Удалить персоналию?');">Удалить</button>
+            </form>
+        </td>
+    </tr>
+    {% else %}
+    <tr>
+        <td colspan="5" class="has-text-centered has-text-grey">Персоналий пока нет</td>
     </tr>
     {% endfor %}
     </tbody>
