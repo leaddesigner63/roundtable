@@ -3,6 +3,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
+from core.seed import seed_initial_data
+
 revision = "0001_initial"
 down_revision = None
 branch_labels = None
@@ -106,6 +108,8 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["session_id"], ["sessions.id"]),
         sa.PrimaryKeyConstraint("id"),
     )
+
+    seed_initial_data(op.get_bind())
 
 
 def downgrade() -> None:

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import json
+from pathlib import Path
 
 import pytest
 
@@ -182,6 +184,59 @@ async def test_orchestrator_stops_on_token_limit(monkeypatch, db_session):
     assert stored_session.status == "stopped"
     tokens_used = sum(msg.tokens_in + msg.tokens_out for msg in stored_session.messages)
     assert tokens_used > settings.max_session_tokens
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_logs_tokens_and_cost(monkeypatch, db_session):
+    log_path = Path("logs/roundtable.log")
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text("")
+
+    secrets = SecretsManager()
+    provider = Provider(
+        name="OpenAI",
+        type="openai",
+        api_key_encrypted=secrets.encrypt("key"),
+        model_id="gpt",
+        parameters={},
+        enabled=True,
+        order_index=0,
+    )
+    personality = Personality(title="Expert", instructions="Будь аналитиком", style="Сдержанный")
+    user = User(telegram_id=123, username="tester")
+    db_session.add_all([provider, personality, user])
+    await db_session.commit()
+
+    stub_adapter = StubAdapter()
+
+    def adapter_factory(provider_type, api_key, model, **params):
+        return stub_adapter
+
+    monkeypatch.setattr("orchestrator.service.create_adapter", adapter_factory)
+
+    orchestrator = DialogueOrchestrator(db_session, settings=DummySettings(), secrets=secrets)
+    session = await orchestrator.create_session(user_id=123, topic="Будущее ИИ", max_rounds=1)
+    await db_session.commit()
+
+    await orchestrator.start_session(session.id)
+    await db_session.commit()
+
+    entries = []
+    for line in log_path.read_text().splitlines():
+        if not line.strip():
+            continue
+        try:
+            entries.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+
+    usage_entries = [entry for entry in entries if entry.get("record", {}).get("message") == "model_message_stored"]
+    assert usage_entries, "Expected model_message_stored entry in logs"
+
+    extra = usage_entries[0]["record"].get("extra", {})
+    assert extra.get("tokens_in") == 5
+    assert extra.get("tokens_out") == 5
+    assert extra.get("cost") == pytest.approx(0.001)
 
 
 @pytest.mark.asyncio
