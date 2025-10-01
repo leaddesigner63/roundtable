@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="title">Сессии</h1>
+<table class="table is-striped is-fullwidth">
+    <thead>
+    <tr>
+        <th>ID</th>
+        <th>Пользователь</th>
+        <th>Тема</th>
+        <th>Статус</th>
+        <th>Раунды</th>
+        <th>Завершено</th>
+    </tr>
+    </thead>
+    <tbody>
+    {% for session in sessions %}
+    <tr>
+        <td>{{ session.id }}</td>
+        <td>{{ session.user_id }}</td>
+        <td>{{ session.topic }}</td>
+        <td>{{ session.status }}</td>
+        <td>{{ session.current_round }} / {{ session.max_rounds }}</td>
+        <td>{{ session.finished_at }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endblock %}
