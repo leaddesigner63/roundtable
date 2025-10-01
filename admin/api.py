@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -46,7 +46,7 @@ class ProviderBase(BaseModel):
     type: str
     api_key: str
     model_id: str
-    parameters: dict = {}
+    parameters: dict = Field(default_factory=dict)
     enabled: bool = True
     order_index: int = 0
 
@@ -136,7 +136,7 @@ async def list_personalities(db: AsyncSession = Depends(get_session)) -> List[Pe
 
 @api_router.post("/personalities", response_model=PersonalityResponse, status_code=201)
 async def create_personality(payload: PersonalityBase, db: AsyncSession = Depends(get_session)) -> Personality:
-    personality = Personality(**payload.dict())
+    personality = Personality(**payload.model_dump())
     db.add(personality)
     await db.commit()
     await db.refresh(personality)
