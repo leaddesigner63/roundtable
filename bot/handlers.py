@@ -5,7 +5,7 @@ from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
-from bot.api_client import api_get, api_post
+from bot.api_client import api_post
 from bot.keyboards import main_menu
 from bot.states import DialogueStates
 from core.config import get_settings
@@ -54,12 +54,19 @@ async def receive_topic(message: Message, state: FSMContext) -> None:
     }
     session = await api_post("/api/sessions", payload)
     session_id = session["id"]
-    await state.update_data(active_session_id=session_id)
-    await message.answer("Запускаю обсуждение... это может занять несколько секунд.")
-    await api_post(f"/api/sessions/{session_id}/start", {})
-    info = await api_get(f"/api/sessions/{session_id}")
-    await state.clear()
-    await message.answer(f"Обсуждение завершено. Раундов: {info['current_round']}. Статус: {info['status']}.")
+    await state.update_data(active_session_id=session_id, awaiting_completion=True)
+    await message.answer(
+        "Запускаю обсуждение... процесс может занять время. Используйте /stop, чтобы прервать обсуждение."
+    )
+    start_info = await api_post(f"/api/sessions/{session_id}/start", {})
+    if start_info.get("status") == "finished":
+        await state.clear()
+        await message.answer(
+            f"Обсуждение завершено. Раундов: {start_info['current_round']}. Статус: {start_info['status']}."
+        )
+        return
+
+    await message.answer("Обсуждение запущено. Ожидайте завершения или используйте /stop для прерывания.")
 
 
 @router.message(Command("stop"))
@@ -70,9 +77,14 @@ async def stop_dialogue(message: Message, state: FSMContext) -> None:
     if not session_id:
         await message.answer("Сейчас нет активного обсуждения.")
         return
-    await api_post(f"/api/sessions/{session_id}/stop", {})
+    info = await api_post(f"/api/sessions/{session_id}/stop", {})
     await state.clear()
-    await message.answer("Диалог остановлен.")
+    if info.get("status") == "stopped":
+        await message.answer(
+            f"Обсуждение прервано. Завершено раундов: {info.get('current_round', 0)}. Статус: {info['status']}."
+        )
+    else:
+        await message.answer("Не удалось обновить статус обсуждения.")
 
 
 @router.message(Command("donate"))

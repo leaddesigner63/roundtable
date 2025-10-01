@@ -195,7 +195,12 @@ async def create_session_api(payload: SessionCreate, db: AsyncSession = Depends(
 @api_router.post("/sessions/{session_id}/start", response_model=SessionResponse)
 async def start_session_api(session_id: int, db: AsyncSession = Depends(get_session)) -> Session:
     orchestrator = DialogueOrchestrator(db)
-    session = await orchestrator.start_session(session_id)
+    try:
+        session = await orchestrator.start_session(session_id)
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 404 if "not found" in detail.lower() else 400
+        raise HTTPException(status_code=status_code, detail=detail)
     await db.commit()
     await db.refresh(session)
     return session
