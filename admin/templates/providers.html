@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="title">Провайдеры</h1>
+<table class="table is-striped is-fullwidth">
+    <thead>
+    <tr>
+        <th>ID</th>
+        <th>Название</th>
+        <th>Тип</th>
+        <th>Model</th>
+        <th>Порядок</th>
+        <th>Вкл.</th>
+    </tr>
+    </thead>
+    <tbody>
+    {% for provider in providers %}
+    <tr>
+        <td>{{ provider.id }}</td>
+        <td>{{ provider.name }}</td>
+        <td>{{ provider.type }}</td>
+        <td>{{ provider.model_id }}</td>
+        <td>{{ provider.order_index }}</td>
+        <td>{{ provider.enabled }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
+</head>
+<body>
+<nav class="navbar is-light">
+    <div class="navbar-brand">
+        <a class="navbar-item" href="/admin">Roundtable AI</a>
+    </div>
+    <div class="navbar-menu">
+        <div class="navbar-start">
+            <a class="navbar-item" href="/admin/providers">Провайдеры</a>
+            <a class="navbar-item" href="/admin/personalities">Персоналии</a>
+            <a class="navbar-item" href="/admin/sessions">Сессии</a>
+            <a class="navbar-item" href="/admin/settings">Настройки</a>
+        </div>
+    </div>
+</nav>
+<section class="section">
+    <div class="container">
+        {% block content %}{% endblock %}
+    </div>
+</section>
+</body>
+</html>
