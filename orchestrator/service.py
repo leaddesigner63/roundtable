@@ -151,7 +151,14 @@ class DialogueOrchestrator:
                 self.db.add(message)
                 await self.db.flush()
                 session.messages.append(message)
-                logger.info("Session %s message stored from %s", session.id, provider.name)
+                logger.info(
+                    "Session %s message stored from %s | tokens_in=%s tokens_out=%s cost=%.5f",
+                    session.id,
+                    provider.name,
+                    tokens_in,
+                    tokens_out,
+                    cost,
+                )
                 await self._log_action(
                     provider.name,
                     "message_posted",
