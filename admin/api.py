@@ -373,15 +373,17 @@ class SettingResponse(BaseModel):
 
 @api_router.get("/settings/{key}", response_model=SettingResponse | None)
 async def get_setting_api(key: str, db: AsyncSession = Depends(get_session)) -> Setting | None:
-    value = await get_setting(db, key)
+    normalized_key = key.upper()
+    value = await get_setting(db, normalized_key)
     if value is None:
         return None
-    return Setting(key=key, value=value)
+    return Setting(key=normalized_key, value=value)
 
 
 @api_router.put("/settings/{key}", response_model=SettingResponse)
 async def set_setting_api(key: str, payload: SettingUpdate, db: AsyncSession = Depends(get_session)) -> Setting:
-    await set_setting(db, key, payload.value)
+    normalized_key = key.upper()
+    await set_setting(db, normalized_key, payload.value)
     await db.commit()
-    value = await get_setting(db, key)
-    return Setting(key=key, value=value or "")
+    value = await get_setting(db, normalized_key)
+    return Setting(key=normalized_key, value=value or "")

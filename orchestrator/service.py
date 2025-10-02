@@ -35,6 +35,11 @@ class DialogueOrchestrator:
         self.db = db
         self.settings = settings or get_settings()
         self.secrets = secrets or get_secrets_manager()
+        self._max_rounds = self.settings.max_rounds
+        self._turn_timeout = float(self.settings.turn_timeout_sec)
+        self._context_limit = self.settings.context_token_limit
+        self._max_session_tokens = getattr(self.settings, "max_session_tokens", None)
+        self._max_cost_per_session = getattr(self.settings, "max_cost_per_session", None)
 
     async def ensure_user(self, telegram_id: int, username: str | None = None) -> User:
         user = await self.db.get(User, telegram_id)
@@ -51,10 +56,11 @@ class DialogueOrchestrator:
         user = await self.db.get(User, user_id)
         if not user:
             raise ValueError("User must exist before creating a session")
+        await self._refresh_limits_from_settings()
         session = Session(
             user_id=user_id,
             topic=topic,
-            max_rounds=max_rounds or self.settings.max_rounds,
+            max_rounds=max_rounds or self._max_rounds,
         )
         self.db.add(session)
         await self.db.flush()
@@ -68,6 +74,7 @@ class DialogueOrchestrator:
         session_id: int,
         progress_callback: Callable[[Message, int], Awaitable[None]] | None = None,
     ) -> Session:
+        await self._refresh_limits_from_settings()
         session = await self._load_session(session_id)
         if not session:
             raise ValueError("Session not found")
@@ -146,7 +153,7 @@ class DialogueOrchestrator:
                 try:
                     reply, metadata = await asyncio.wait_for(
                         adapter.complete(prompt=prompt, context=context_messages),
-                        timeout=self.settings.turn_timeout_sec,
+                        timeout=self._turn_timeout,
                     )
                 except asyncio.TimeoutError:
                     logger.warning(
@@ -346,7 +353,7 @@ class DialogueOrchestrator:
 
     def _context_exceeds_limit(self, session: Session) -> bool:
         total_tokens = sum(estimate_tokens(msg.content) for msg in session.messages)
-        return total_tokens > self.settings.context_token_limit
+        return total_tokens > self._context_limit
 
     async def _compress_history(self, session: Session) -> None:
         if not session.messages:
@@ -370,9 +377,10 @@ class DialogueOrchestrator:
             snippet = message.content.strip().replace("\n", " ")
             if len(snippet) > 200:
                 snippet = snippet[:200].rsplit(" ", 1)[0] + "…"
-            summary_parts.append(f"{message.author_name}: {snippet}")
+            summary_parts.append(f"- {message.author_name}: {snippet}")
 
-        summary_text = "Сводка предыдущего обсуждения:\n" + "\n".join(summary_parts)
+        summary_header = f"Сводка предыдущего обсуждения (сжато {len(to_compress)} сообщений):"
+        summary_text = summary_header + "\n" + "\n".join(summary_parts)
         summary_message = Message(
             session_id=session.id,
             author_type=MessageAuthorType.SYSTEM.value,
@@ -404,23 +412,77 @@ class DialogueOrchestrator:
 
     def _check_usage_limits(self, session: Session) -> Tuple[str, int, float] | None:
         total_tokens, total_cost = self._calculate_usage(session)
-        if (
-            getattr(self.settings, "max_session_tokens", None)
-            and total_tokens > self.settings.max_session_tokens
-        ):
+        if self._max_session_tokens and total_tokens > self._max_session_tokens:
             logger.info(
-                "Session %s exceeded token limit %s", session.id, self.settings.max_session_tokens
+                "Session %s exceeded token limit %s", session.id, self._max_session_tokens
             )
             return "token_limit", total_tokens, total_cost
-        if (
-            getattr(self.settings, "max_cost_per_session", None)
-            and total_cost > self.settings.max_cost_per_session
-        ):
+        if self._max_cost_per_session and total_cost > self._max_cost_per_session:
             logger.info(
-                "Session %s exceeded cost limit %s", session.id, self.settings.max_cost_per_session
+                "Session %s exceeded cost limit %s", session.id, self._max_cost_per_session
             )
             return "cost_limit", total_tokens, total_cost
         return None
+
+    async def _refresh_limits_from_settings(self) -> None:
+        result = await self.db.execute(select(Setting))
+        overrides: dict[str, str] = {}
+        for setting in result.scalars():
+            overrides[setting.key.upper()] = setting.value
+
+        self._max_rounds = self._coerce_int(overrides.get("MAX_ROUNDS"), self.settings.max_rounds, key="MAX_ROUNDS")
+        self._turn_timeout = self._coerce_float(
+            overrides.get("TURN_TIMEOUT_SEC"), float(self.settings.turn_timeout_sec), key="TURN_TIMEOUT_SEC"
+        )
+        self._context_limit = self._coerce_int(
+            overrides.get("CONTEXT_TOKEN_LIMIT"), self.settings.context_token_limit, key="CONTEXT_TOKEN_LIMIT"
+        )
+        self._max_session_tokens = self._coerce_optional_int(
+            overrides.get("MAX_SESSION_TOKENS"), getattr(self.settings, "max_session_tokens", None), key="MAX_SESSION_TOKENS"
+        )
+        self._max_cost_per_session = self._coerce_optional_float(
+            overrides.get("MAX_COST_PER_SESSION"), getattr(self.settings, "max_cost_per_session", None), key="MAX_COST_PER_SESSION"
+        )
+
+    @staticmethod
+    def _coerce_int(value: str | None, default: int, *, key: str) -> int:
+        if value is None:
+            return default
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            logger.warning("Invalid integer setting for {}", key, value=value)
+            return default
+
+    @staticmethod
+    def _coerce_float(value: str | None, default: float, *, key: str) -> float:
+        if value is None:
+            return default
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            logger.warning("Invalid float setting for {}", key, value=value)
+            return default
+
+    @classmethod
+    def _coerce_optional_int(cls, value: str | None, default: int | None, *, key: str) -> int | None:
+        if value is None:
+            return default
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            logger.warning("Invalid integer setting for {}", key, value=value)
+            return default
+
+    @classmethod
+    def _coerce_optional_float(cls, value: str | None, default: float | None, *, key: str) -> float | None:
+        if value is None:
+            return default
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            logger.warning("Invalid float setting for {}", key, value=value)
+            return default
 
     async def _log_action(self, actor: str, action: str, meta: dict) -> None:
         log = AuditLog(actor=actor, action=action, meta=meta)

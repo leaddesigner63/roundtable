@@ -8,7 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
 
-from core.models import Personality, Provider
+from core.config import get_settings
+from core.models import Personality, Provider, Setting
 from core.security import SecretsManager
 
 
@@ -106,14 +107,23 @@ def _seed_personalities(session: Session, seeds: Iterable[PersonalitySeed]) -> b
     return created
 
 
+def _seed_payment_url(session: Session, url: str) -> None:
+    existing = session.get(Setting, "PAYMENT_URL")
+    if existing:
+        return
+    session.add(Setting(key="PAYMENT_URL", value=str(url)))
+
+
 def seed_initial_data(bind: Connection) -> None:
-    """Populate providers and personalities with default records."""
+    """Populate providers, personalities and core settings with default records."""
 
     session = Session(bind=bind)
     try:
         secrets = SecretsManager()
         _seed_providers(session, secrets, DEFAULT_PROVIDERS)
         _seed_personalities(session, DEFAULT_PERSONALITIES)
+        settings = get_settings()
+        _seed_payment_url(session, settings.payment_url)
         session.commit()
     except Exception:
         session.rollback()

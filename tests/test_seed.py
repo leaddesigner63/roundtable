@@ -4,7 +4,8 @@ import pytest
 from sqlalchemy import select
 
 from core import db as core_db
-from core.models import Personality, Provider
+from core.config import get_settings
+from core.models import Personality, Provider, Setting
 from core.security import SecretsManager
 from core.seed import seed_initial_data
 
@@ -20,6 +21,7 @@ async def test_seed_initial_data_creates_defaults(engine) -> None:
     async with core_db.AsyncSessionLocal() as session:
         providers = (await session.execute(select(Provider))).scalars().all()
         personalities = (await session.execute(select(Personality))).scalars().all()
+        payment_setting = await session.get(Setting, "PAYMENT_URL")
 
     provider_names = {provider.name for provider in providers}
     assert {"ChatGPT", "DeepSeek"}.issubset(provider_names)
@@ -35,3 +37,7 @@ async def test_seed_initial_data_creates_defaults(engine) -> None:
     }
     assert decrypted["ChatGPT"] == ""
     assert decrypted["DeepSeek"] == ""
+
+    settings = get_settings()
+    assert payment_setting is not None
+    assert payment_setting.value == str(settings.payment_url)
