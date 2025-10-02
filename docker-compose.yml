@@ -6,12 +6,16 @@ services:
       context: .
       dockerfile: Dockerfile.api
       target: runtime
-    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    command: >-
+      sh -c "alembic upgrade head &&
+      uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
     env_file:
       - .env
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
     ports:
       - "8000:8000"
 
@@ -24,8 +28,10 @@ services:
     env_file:
       - .env
     depends_on:
-      - api
-      - redis
+      api:
+        condition: service_started
+      redis:
+        condition: service_started
 
   worker:
     build:
@@ -36,8 +42,10 @@ services:
     env_file:
       - .env
     depends_on:
-      - redis
-      - db
+      redis:
+        condition: service_started
+      db:
+        condition: service_healthy
 
   db:
     image: postgres:14
@@ -50,6 +58,12 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   redis:
     image: redis:6
