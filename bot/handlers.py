@@ -17,6 +17,7 @@ settings = get_settings()
 @router.message(CommandStart())
 async def start_handler(message: Message, state: FSMContext) -> None:
     await state.clear()
+    await _ensure_user(message)
     await message.answer(
         "Привет! Я организую круглый стол между моделями. Нажмите \"Новое обсуждение\" чтобы начать.",
         reply_markup=main_menu,

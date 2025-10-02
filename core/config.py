@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o-mini"
     deepseek_api_key: str
     deepseek_model: str = "deepseek-chat"
+    database_url_override: str | None = None
 
     class Config:
         env_file = ".env"
@@ -30,6 +31,9 @@ class Settings(BaseSettings):
 
     @property
     def database_url(self) -> str:
+        if self.database_url_override:
+            return self.database_url_override
+
         return (
             f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
