@@ -6,6 +6,7 @@ from typing import Optional
 from enum import Enum as PyEnum
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     DateTime,
     Enum,
@@ -27,7 +28,7 @@ Base.metadata.clear()
 class User(Base):
     __tablename__ = "users"
 
-    telegram_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    telegram_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
     username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -76,7 +77,7 @@ class Session(Base):
     __tablename__ = "sessions"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.telegram_id"))
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.telegram_id"))
     topic: Mapped[str] = mapped_column(String(500))
     status: Mapped[str] = mapped_column(String(20), default=SessionStatusEnum.DRAFT.value)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

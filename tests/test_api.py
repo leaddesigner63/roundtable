@@ -210,3 +210,18 @@ async def test_stop_session_during_stream(monkeypatch):
         assert events[-1]["status"] == "stopped"
         message_events = [event for event in events if event.get("type") == "message"]
         assert len(message_events) <= 1
+
+
+@pytest.mark.asyncio
+async def test_create_user_with_large_telegram_id():
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        large_id = 999_999_999_999
+        response = await client.post(
+            "/api/users",
+            json={"telegram_id": large_id, "username": "big"},
+        )
+
+        assert response.status_code == 201
+        payload = response.json()
+        assert payload["telegram_id"] == large_id

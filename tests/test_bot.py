@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from bot.handlers import stop_dialogue
+from bot.handlers import start_handler, stop_dialogue
 
 
 class DummyState:
@@ -18,11 +18,12 @@ class DummyState:
 
 
 class DummyMessage:
-    def __init__(self) -> None:
-        self.answers: list[str] = []
+    def __init__(self, *, user_id: int = 1, username: str | None = None) -> None:
+        self.answers: list[dict[str, object]] = []
+        self.from_user = type("User", (), {"id": user_id, "username": username})()
 
-    async def answer(self, text: str) -> None:
-        self.answers.append(text)
+    async def answer(self, text: str, reply_markup=None) -> None:
+        self.answers.append({"text": text, "reply_markup": reply_markup})
 
 
 @pytest.mark.asyncio
@@ -42,7 +43,7 @@ async def test_stop_dialogue_with_active_session(monkeypatch: pytest.MonkeyPatch
 
     assert calls == [("/api/sessions/55/stop", {})]
     assert state.cleared is True
-    assert message.answers[-1] == "Диалог остановлен."
+    assert message.answers[-1]["text"] == "Диалог остановлен."
 
 
 @pytest.mark.asyncio
@@ -57,5 +58,27 @@ async def test_stop_dialogue_without_active_session(monkeypatch: pytest.MonkeyPa
 
     await stop_dialogue(message, state)
 
-    assert message.answers == ["Сейчас нет активного обсуждения."]
+    assert message.answers == [{"text": "Сейчас нет активного обсуждения.", "reply_markup": None}]
     assert state.cleared is False
+
+
+@pytest.mark.asyncio
+async def test_start_handler_registers_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, dict]] = []
+
+    async def fake_api_post(path: str, payload: dict) -> dict:
+        calls.append((path, payload))
+        return payload
+
+    monkeypatch.setattr("bot.handlers.api_post", fake_api_post)
+
+    large_id = 999_999_999_999
+    message = DummyMessage(user_id=large_id, username="big")
+    state = DummyState({"active_session_id": 22})
+
+    await start_handler(message, state)
+
+    assert state.cleared is True
+    assert calls == [("/api/users", {"telegram_id": large_id, "username": "big"})]
+    assert message.answers
+    assert message.answers[0]["text"].startswith("Привет!")
