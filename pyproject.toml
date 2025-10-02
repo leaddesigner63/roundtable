@@ -54,6 +54,9 @@ ignore = ["D100", "D104", "D401"]
 [tool.pytest.ini_options]
 addopts = "-ra"
 asyncio_mode = "auto"
+testpaths = [
+    "tests",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]
