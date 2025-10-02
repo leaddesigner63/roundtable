@@ -439,7 +439,7 @@ async def admin_settings(request: Request, db: AsyncSession = Depends(get_sessio
 @app.post("/admin/settings/new")
 async def admin_setting_create(request: Request, db: AsyncSession = Depends(get_session)) -> HTMLResponse:
     form = await request.form()
-    key = form.get("key", "").strip()
+    key = form.get("key", "").strip().upper()
     value = form.get("value", "").strip()
     errors: list[str] = []
     if not key:
@@ -473,7 +473,8 @@ async def admin_setting_create(request: Request, db: AsyncSession = Depends(get_
 async def admin_setting_update(
     key: str, request: Request, db: AsyncSession = Depends(get_session)
 ) -> RedirectResponse:
-    setting = await db.get(Setting, key)
+    normalized_key = key.upper()
+    setting = await db.get(Setting, normalized_key)
     if not setting:
         raise HTTPException(status_code=404, detail="Setting not found")
     form = await request.form()
@@ -484,7 +485,8 @@ async def admin_setting_update(
 
 @app.post("/admin/settings/{key}/delete")
 async def admin_setting_delete(key: str, db: AsyncSession = Depends(get_session)) -> RedirectResponse:
-    setting = await db.get(Setting, key)
+    normalized_key = key.upper()
+    setting = await db.get(Setting, normalized_key)
     if setting:
         await db.delete(setting)
         await db.commit()

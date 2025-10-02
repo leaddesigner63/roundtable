@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from core.models import Personality, Provider, Session, SessionParticipant, User
+from core.models import Personality, Provider, Session, SessionParticipant, Setting, User
 from core.security import SecretsManager
 from orchestrator.service import DialogueOrchestrator
 
@@ -275,3 +275,52 @@ async def test_orchestrator_stops_on_timeout(monkeypatch, db_session):
     assert stored_session.status == "stopped"
     model_messages = [msg for msg in stored_session.messages if msg.author_type == "model"]
     assert not model_messages
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_applies_db_settings_overrides(monkeypatch, db_session):
+    secrets = SecretsManager()
+    provider = Provider(
+        name="OpenAI",
+        type="openai",
+        api_key_encrypted=secrets.encrypt("key"),
+        model_id="gpt",
+        parameters={},
+        enabled=True,
+        order_index=0,
+    )
+    personality = Personality(title="Expert", instructions="Будь аналитиком", style="Сдержанный")
+    user = User(telegram_id=999, username="settings")
+    db_session.add_all([provider, personality, user])
+    await db_session.flush()
+
+    overrides = [
+        Setting(key="MAX_ROUNDS", value="1"),
+        Setting(key="TURN_TIMEOUT_SEC", value="0.01"),
+        Setting(key="MAX_SESSION_TOKENS", value="9999"),
+        Setting(key="MAX_COST_PER_SESSION", value="10"),
+        Setting(key="CONTEXT_TOKEN_LIMIT", value="5000"),
+    ]
+    db_session.add_all(overrides)
+    await db_session.commit()
+
+    def adapter_factory(provider_type, api_key, model, **params):
+        return SlowAdapter()
+
+    monkeypatch.setattr("orchestrator.service.create_adapter", adapter_factory)
+
+    settings = DummySettings()
+    settings.max_rounds = 5
+    settings.turn_timeout_sec = 5.0
+    orchestrator = DialogueOrchestrator(db_session, settings=settings, secrets=secrets)
+
+    session = await orchestrator.create_session(user_id=user.telegram_id, topic="Overrides проверка")
+    assert session.max_rounds == 1
+    await db_session.commit()
+
+    await orchestrator.start_session(session.id)
+    await db_session.commit()
+
+    stored_session = await db_session.get(Session, session.id)
+    assert stored_session.status == "stopped"
+    assert stored_session.current_round == 0

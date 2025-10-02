@@ -16,7 +16,7 @@ async def api_post(path: str, json: dict[str, Any]) -> dict[str, Any]:
         return response.json()
 
 
-async def api_get(path: str) -> dict[str, Any]:
+async def api_get(path: str) -> Any:
     async with httpx.AsyncClient(timeout=60) as client:
         response = await client.get(f"{API_BASE}{path}")
         response.raise_for_status()

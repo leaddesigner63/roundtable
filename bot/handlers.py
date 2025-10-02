@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from aiogram import Router, F
+from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
@@ -55,6 +55,7 @@ async def receive_topic(message: Message, state: FSMContext) -> None:
     session = await api_post("/api/sessions", payload)
     session_id = session["id"]
     await state.update_data(active_session_id=session_id)
+    await state.set_state(DialogueStates.dialogue_running)
     await message.answer("Запускаю обсуждение... это может занять несколько секунд.")
     summary: dict | None = None
     try:
@@ -62,7 +63,8 @@ async def receive_topic(message: Message, state: FSMContext) -> None:
             if event.get("type") == "message":
                 author = event.get("author", "Модель")
                 content = event.get("content", "")
-                await message.answer(f"{author}: {content}")
+                if content:
+                    await message.answer(f"{author}: {content}")
             elif event.get("type") == "session":
                 summary = event
     except Exception:
@@ -98,4 +100,11 @@ async def stop_dialogue(message: Message, state: FSMContext) -> None:
 @router.message(Command("donate"))
 @router.message(F.text == "Отблагодарить создателя")
 async def donate_handler(message: Message) -> None:
-    await message.answer(f"Поддержать проект: {settings.payment_url}")
+    payment_url = settings.payment_url
+    try:
+        payload = await api_get("/api/settings/PAYMENT_URL")
+        if isinstance(payload, dict) and payload.get("value"):
+            payment_url = payload["value"]
+    except Exception:  # pragma: no cover - network/runtime failure fallback
+        pass
+    await message.answer(f"Поддержать проект: {payment_url}")
